@@ -1,0 +1,101 @@
+﻿record_id,expected_action,expected_assignee,expected_deadline,expected_priority,expected_action_required,expected_audit_status
+H001,部品Aの在庫を確認する,田中,2026-09-16 15:00,中,true,READY
+H002,取引先へ請求金額を確認する,,2026-09-17 12:00,中,true,NEEDS_REVIEW
+H003,,,,低,false,INFO_ONLY
+H004,配送会社へ連絡する,佐藤,,高,true,NEEDS_REVIEW
+H005,照明を交換する,,,低,true,NEEDS_REVIEW
+H006,設備3号機の異音を確認する,鈴木,2026-09-16 11:00,高,true,READY
+H007,予備電源8の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H008,生活用品便1の受け入れ場所を準備する,山本,2026-09-18 17:00,中,true,READY
+H009,連絡網2の更新内容を確認する,加藤,2026-09-16 17:00,低,true,READY
+H010,備品3の残数を確認する,田中,2026-09-17 17:00,中,true,READY
+H011,仕入先へ発注数量を確認する,,2026-09-18 17:00,中,true,NEEDS_REVIEW
+H012,,,,低,false,INFO_ONLY
+H013,配送便6について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H014,共用スペース7の照明を交換する,,,低,true,NEEDS_REVIEW
+H015,設備8号機の異音を確認する,中村,2026-09-16 17:00,高,true,READY
+H016,,吉田,2026-09-17 17:00,中,true,NEEDS_REVIEW
+H017,予備電源2の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H018,生活用品便3の受け入れ場所を準備する,山本,2026-09-16 17:00,中,true,READY
+H019,連絡網4の更新内容を確認する,加藤,2026-09-17 17:00,低,true,READY
+H020,備品5の残数を確認する,田中,2026-09-18 17:00,中,true,READY
+H021,仕入先へ発注数量を確認する,,2026-09-17 17:00,中,true,NEEDS_REVIEW
+H022,,,,低,false,INFO_ONLY
+H023,配送便8について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H024,共用スペース1の照明を交換する,,,低,true,NEEDS_REVIEW
+H025,設備2号機の異音を確認する,中村,2026-09-18 17:00,高,true,READY
+H026,,吉田,2026-09-19 17:00,中,true,NEEDS_REVIEW
+H027,予備電源4の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H028,生活用品便5の受け入れ場所を準備する,山本,2026-09-18 17:00,中,true,READY
+H029,連絡網6の更新内容を確認する,加藤,2026-09-19 17:00,低,true,READY
+H030,備品7の残数を確認する,田中,2026-09-17 17:00,中,true,READY
+H031,仕入先へ発注数量を確認する,,2026-09-18 17:00,中,true,NEEDS_REVIEW
+H032,,,,低,false,INFO_ONLY
+H033,配送便2について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H034,共用スペース3の照明を交換する,,,低,true,NEEDS_REVIEW
+H035,設備4号機の異音を確認する,中村,2026-09-19 17:00,高,true,READY
+H036,,吉田,2026-09-17 17:00,中,true,NEEDS_REVIEW
+H037,予備電源6の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H038,生活用品便7の受け入れ場所を準備する,山本,2026-09-19 17:00,中,true,READY
+H039,連絡網8の更新内容を確認する,加藤,2026-09-17 17:00,低,true,READY
+H040,備品1の残数を確認する,田中,2026-09-18 17:00,中,true,READY
+H041,仕入先へ発注数量を確認する,,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H042,,,,低,false,INFO_ONLY
+H043,配送便4について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H044,共用スペース5の照明を交換する,,,低,true,NEEDS_REVIEW
+H045,設備6号機の異音を確認する,中村,2026-09-18 17:00,高,true,READY
+H046,,吉田,2026-09-19 17:00,中,true,NEEDS_REVIEW
+H047,予備電源8の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H048,生活用品便1の受け入れ場所を準備する,山本,2026-09-18 17:00,中,true,READY
+H049,連絡網2の更新内容を確認する,加藤,2026-09-19 17:00,低,true,READY
+H050,備品3の残数を確認する,田中,2026-09-20 17:00,中,true,READY
+H051,仕入先へ発注数量を確認する,,2026-09-18 17:00,中,true,NEEDS_REVIEW
+H052,,,,低,false,INFO_ONLY
+H053,配送便6について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H054,共用スペース7の照明を交換する,,,低,true,NEEDS_REVIEW
+H055,設備8号機の異音を確認する,中村,2026-09-19 17:00,高,true,READY
+H056,,吉田,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H057,予備電源2の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H058,生活用品便3の受け入れ場所を準備する,山本,2026-09-19 17:00,中,true,READY
+H059,連絡網4の更新内容を確認する,加藤,2026-09-20 17:00,低,true,READY
+H060,備品5の残数を確認する,田中,2026-09-18 17:00,中,true,READY
+H061,仕入先へ発注数量を確認する,,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H062,,,,低,false,INFO_ONLY
+H063,配送便8について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H064,共用スペース1の照明を交換する,,,低,true,NEEDS_REVIEW
+H065,設備2号機の異音を確認する,中村,2026-09-21 17:00,高,true,READY
+H066,,吉田,2026-09-19 17:00,中,true,NEEDS_REVIEW
+H067,予備電源4の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H068,生活用品便5の受け入れ場所を準備する,山本,2026-09-21 17:00,中,true,READY
+H069,連絡網6の更新内容を確認する,加藤,2026-09-19 17:00,低,true,READY
+H070,備品7の残数を確認する,田中,2026-09-20 17:00,中,true,READY
+H071,仕入先へ発注数量を確認する,,2026-09-21 17:00,中,true,NEEDS_REVIEW
+H072,,,,低,false,INFO_ONLY
+H073,配送便2について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H074,共用スペース3の照明を交換する,,,低,true,NEEDS_REVIEW
+H075,設備4号機の異音を確認する,中村,2026-09-19 17:00,高,true,READY
+H076,,吉田,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H077,予備電源6の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H078,生活用品便7の受け入れ場所を準備する,山本,2026-09-19 17:00,中,true,READY
+H079,連絡網8の更新内容を確認する,加藤,2026-09-20 17:00,低,true,READY
+H080,備品1の残数を確認する,田中,2026-09-21 17:00,中,true,READY
+H081,仕入先へ発注数量を確認する,,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H082,,,,低,false,INFO_ONLY
+H083,配送便4について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H084,共用スペース5の照明を交換する,,,低,true,NEEDS_REVIEW
+H085,設備6号機の異音を確認する,中村,2026-09-21 17:00,高,true,READY
+H086,,吉田,2026-09-22 17:00,中,true,NEEDS_REVIEW
+H087,予備電源8の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H088,生活用品便1の受け入れ場所を準備する,山本,2026-09-21 17:00,中,true,READY
+H089,連絡網2の更新内容を確認する,加藤,2026-09-22 17:00,低,true,READY
+H090,備品3の残数を確認する,田中,2026-09-20 17:00,中,true,READY
+H091,仕入先へ発注数量を確認する,,2026-09-21 17:00,中,true,NEEDS_REVIEW
+H092,,,,低,false,INFO_ONLY
+H093,配送便6について運送会社へ連絡する,山田,,高,true,NEEDS_REVIEW
+H094,共用スペース7の照明を交換する,,,低,true,NEEDS_REVIEW
+H095,設備8号機の異音を確認する,中村,2026-09-22 17:00,高,true,READY
+H096,,吉田,2026-09-20 17:00,中,true,NEEDS_REVIEW
+H097,予備電源2の燃料補充を手配する,,,高,true,NEEDS_REVIEW
+H098,生活用品便3の受け入れ場所を準備する,山本,2026-09-22 17:00,中,true,READY
+H099,連絡網4の更新内容を確認する,加藤,2026-09-20 17:00,低,true,READY
+H100,備品5の残数を確認する,田中,2026-09-21 17:00,中,true,READY

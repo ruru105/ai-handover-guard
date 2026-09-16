@@ -1,0 +1,144 @@
+# AI Handover Guard
+
+> 申し送り文章から「誰が・何を・いつまでに」を整理し、対応漏れにつながる曖昧さを警告する業務フロー自動化ツールです。
+
+## 何を解決する作品か
+
+職場の申し送りには、次のような文章がよくあります。
+
+> 部品の件、明日の午前中までに業者へ確認してください。
+
+作業内容と期限は分かりますが、担当者が決まっていません。AI Handover Guardは、文章から必要な情報を構造化し、Pythonの固定ルールで不足項目を再確認します。
+
+## 処理の流れ
+
+1. CSVから申し送り文章を読み込む
+2. AIが担当者・作業・期限・緊急度を抽出する
+3. Pythonが必須項目の不足と優先度の食い違いを監査する
+4. 警告付きの一覧をCSV／Excelへ出力する
+5. 将来版では、重要案件だけを通知する
+
+## この作品の特徴
+
+- AIの要約結果をそのまま信用せず、Pythonのルールでも監査する
+- 製造・介護・事務・物流など、業種を限定しない
+- 一般職員には「自分がすること」、管理者には「担当・期限の未確定」を表示できる設計
+- 正解ラベル付きデータでAIの抽出精度を評価できる
+- 最終的には入力から記録・通知までをつなぐAI Business Workflow Automationを目指す
+
+## 現在の段階
+
+V0.3では、OpenAI APIの抽出結果をPythonが独立監査します。優先度はAI判定とルール判定を並べ、表現差は完全一致と正規化一致に分けて評価できます。
+
+```text
+data/raw_handover.csv      ← AIに渡す問題
+data/expected_labels.csv   ← 人間が決めた正解表
+data/mock_ai_output.csv    ← 現段階の模擬AI回答
+        ↓
+src/audit_rules.py         ← 不足項目を監査
+        ↓
+output/audit_result.csv
+        ↓
+src/evaluate_predictions.py ← 正解表と比較
+        ↓
+output/evaluation_summary.csv
+output/evaluation_details.csv ← どの項目が違ったかを確認
+```
+
+## 実行方法
+
+```bash
+python src/audit_rules.py
+python src/evaluate_predictions.py
+```
+
+実際のAI回答を追加課金なしで監査・評価する場合：
+
+```bash
+python src/run_trial_pipeline.py
+```
+
+このコマンドは既存の `output/ai_predictions.csv` を使用し、新しいAPI通信は行いません。
+
+## テスト
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+## 試験データの再生成
+
+```bash
+python scripts/generate_sample_data.py
+```
+
+同じ条件で100件を再生成できるため、監査ルールを変更した前後の結果を比較できます。
+
+模擬回答で表示される正解率100%は採点経路の動作確認であり、実際のAI性能ではありません。実AI試験では `action_exact` と `action_normalized`、`priority_ai` と `priority_rule` を分け、`evaluation_details.csv` で不一致理由を確認します。
+
+## 実API検証結果（V0.3）
+
+2026年9月16日に、架空の申し送り10件をGPT-5.6 Lunaで抽出しました。
+
+| 評価項目 | 結果 |
+|---|---:|
+| 対応内容・完全一致 | 4/10 |
+| 対応内容・正規化一致 | 7/10 |
+| 対応内容・人による意味確認 | 10/10 |
+| 担当者 | 10/10 |
+| 期限 | 10/10 |
+| AI優先度 | 10/10 |
+| Python優先度 | 10/10 |
+| 対応要否 | 10/10 |
+| 監査判定 | 10/10 |
+
+完全一致しなかった対応内容は、語尾の省略や「会議室」などの文脈追加による表現差でした。10件という小規模試験のため一般性能を示すものではありませんが、AI抽出とPython監査を分ける設計が動作することを確認できました。詳しい経過は [`docs/VALIDATION_REPORT.md`](docs/VALIDATION_REPORT.md) に記録しています。
+
+## 評価指標の読み方
+
+- `action_exact`：正解表との文字列完全一致
+- `action_normalized`：空白・句読点・末尾の「する」をそろえた一致
+- `priority_ai`：AIが出した優先度の一致
+- `priority_rule`：Pythonが原文から独立判定した優先度の一致
+- `all_fields_exact`：主要項目がすべて完全一致した割合
+- `all_fields_normalized`：対応内容を正規化した上で主要項目がすべて一致した割合
+
+## 開発予定
+
+- V0.1：必須項目の不足監査
+- V0.2：LLMによる10件抽出、正規化、不一致明細
+- V0.3：AI優先度の独立監査、対応内容の正規化評価
+- V0.4：期限超過・重複候補の判定
+- V0.5：Excelレポートと管理者ビュー
+- V1.0：入力から通知までの一連の業務フロー
+
+## API接続の安全設計
+
+- 初回は最大10件に固定
+- 既定モデルはGPT-5.6 Luna
+- `--execute` を明示しない限りAPI通信しない
+- 自動再試行なし
+- 1件当たりの最大出力を300トークンに制限
+- 入出力トークンと概算料金をCSVへ記録
+- APIキーは `.env` に保存し、GitHubには公開しない
+
+安全確認のみを行う場合：
+
+```bash
+python src/llm_extractor.py
+```
+
+有料API通信は、APIキーと利用上限を確認した後だけ実行します。
+
+```bash
+python src/llm_extractor.py --execute --limit 10
+```
+
+## 注意事項
+
+サンプルデータはすべて架空です。個人情報や実在する職場の内部情報は使用しません。
+
+- 実API検証は10件のみであり、本番運用の精度保証ではありません。
+- 優先度ルールはサンプル用です。実運用では業種や組織に合わせた設定が必要です。
+- AIの出力は実行ごとに表現が変わる可能性があります。
+- `.env`、APIキー、実在する個人情報をGitHubへ登録しないでください。
