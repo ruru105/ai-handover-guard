@@ -1,8 +1,9 @@
-"""AI Handover Guard V0.1 の監査ルールテスト。"""
+"""AI Handover Guard V0.1〜V0.4 の監査ルールテスト。"""
 
 import csv
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 
@@ -10,7 +11,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
-from audit_rules import audit_record, determine_rule_priority  # noqa: E402
+from audit_rules import (  # noqa: E402
+    audit_record,
+    audit_records,
+    determine_rule_priority,
+)
 
 
 class AuditRecordTest(unittest.TestCase):
@@ -105,6 +110,288 @@ class AuditRecordTest(unittest.TestCase):
                 expected[record_id]["expected_priority"],
                 record_id,
             )
+
+    def test_claim_keyword_makes_priority_high(self) -> None:
+        record = {
+            "message_text": "取引先からクレームがありました",
+            "action_required": "true",
+        }
+
+        self.assertEqual(determine_rule_priority(record), "高")
+
+
+class SlaAuditTest(unittest.TestCase):
+    """V0.4: 緊急度に応じた期限超過（着手遅延）判定を確認する。"""
+
+    def test_high_priority_overdue_after_sla_hours(self) -> None:
+        record = {
+            "message_text": "設備3号機から異音があります",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "設備を確認する",
+            "extracted_assignee": "鈴木",
+            "extracted_deadline": "2026-09-20 17:00",
+            "extracted_priority": "高",
+        }
+
+        result = audit_record(
+            record,
+            as_of=datetime(2026, 9, 16, 13, 0),
+            sla_hours=4,
+        )
+
+        self.assertEqual(result["rule_priority"], "高")
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+
+    def test_high_priority_within_sla_hours(self) -> None:
+        record = {
+            "message_text": "設備3号機から異音があります",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "設備を確認する",
+            "extracted_assignee": "鈴木",
+            "extracted_deadline": "2026-09-20 17:00",
+            "extracted_priority": "高",
+        }
+
+        result = audit_record(
+            record,
+            as_of=datetime(2026, 9, 16, 10, 0),
+            sla_hours=4,
+        )
+
+        self.assertEqual(result["sla_audit_status"], "ON_TIME")
+
+    def test_high_priority_ignores_far_extracted_deadline(self) -> None:
+        """文中の期限が先でも、緊急度「高」はSLA時間を優先して超過扱いにする。"""
+
+        record = {
+            "message_text": "クレームがありました",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "確認する",
+            "extracted_assignee": "田中",
+            "extracted_deadline": "2026-09-30 17:00",
+            "extracted_priority": "高",
+        }
+
+        result = audit_record(
+            record,
+            as_of=datetime(2026, 9, 16, 13, 0),
+            sla_hours=4,
+        )
+
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+
+    def test_medium_priority_uses_extracted_deadline(self) -> None:
+        record = {
+            "message_text": "在庫を確認してください",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "在庫を確認する",
+            "extracted_assignee": "田中",
+            "extracted_deadline": "2026-09-16 15:00",
+            "extracted_priority": "中",
+        }
+
+        overdue = audit_record(record, as_of=datetime(2026, 9, 16, 16, 0))
+        on_time = audit_record(record, as_of=datetime(2026, 9, 16, 14, 0))
+
+        self.assertEqual(overdue["sla_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(on_time["sla_audit_status"], "ON_TIME")
+
+    def test_info_only_is_not_applicable(self) -> None:
+        record = {
+            "message_text": "共有のみです",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "false",
+        }
+
+        result = audit_record(record, as_of=datetime(2026, 9, 20, 8, 0))
+
+        self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE")
+
+    def test_missing_submitted_at_is_unknown(self) -> None:
+        record = {
+            "message_text": "設備を確認してください",
+            "submitted_at": "",
+            "action_required": "true",
+            "extracted_priority": "中",
+        }
+
+        result = audit_record(record, as_of=datetime(2026, 9, 16, 8, 0))
+
+        self.assertEqual(result["sla_audit_status"], "UNKNOWN")
+
+    def test_missing_extracted_deadline_for_medium_priority_is_not_applicable(
+        self,
+    ) -> None:
+        record = {
+            "message_text": "確認してください",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_deadline": "",
+            "extracted_priority": "中",
+        }
+
+        result = audit_record(record, as_of=datetime(2026, 9, 20, 8, 0))
+
+        self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE")
+
+
+class DuplicateAuditTest(unittest.TestCase):
+    """V0.4: 同じ担当者・同じ作業内容の重複候補判定を確認する。"""
+
+    def test_duplicate_detected_within_window(self) -> None:
+        records = [
+            {
+                "record_id": "R1",
+                "message_text": "設備を確認してください",
+                "submitted_at": "2026-09-16 08:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+            {
+                "record_id": "R2",
+                "message_text": "設備を確認してください",
+                "submitted_at": "2026-09-16 10:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+        ]
+
+        results = audit_records(records, duplicate_window_hours=24)
+
+        self.assertEqual(results[0]["duplicate_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(results[1]["duplicate_audit_status"], "NEEDS_REVIEW")
+        self.assertIn("R2", results[0]["duplicate_audit_message"])
+        self.assertIn("R1", results[1]["duplicate_audit_message"])
+
+    def test_no_duplicate_outside_window(self) -> None:
+        records = [
+            {
+                "record_id": "R1",
+                "submitted_at": "2026-09-16 08:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+            {
+                "record_id": "R2",
+                "submitted_at": "2026-09-18 08:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-18 17:00",
+                "extracted_priority": "中",
+            },
+        ]
+
+        results = audit_records(records, duplicate_window_hours=24)
+
+        self.assertEqual(results[0]["duplicate_audit_status"], "UNIQUE")
+        self.assertEqual(results[1]["duplicate_audit_status"], "UNIQUE")
+
+    def test_different_assignee_is_not_grouped(self) -> None:
+        records = [
+            {
+                "record_id": "R1",
+                "submitted_at": "2026-09-16 08:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+            {
+                "record_id": "R2",
+                "submitted_at": "2026-09-16 09:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "田中",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+        ]
+
+        results = audit_records(records, duplicate_window_hours=24)
+
+        self.assertEqual(results[0]["duplicate_audit_status"], "UNIQUE")
+        self.assertEqual(results[1]["duplicate_audit_status"], "UNIQUE")
+
+    def test_normalization_ignores_whitespace_and_punctuation(self) -> None:
+        records = [
+            {
+                "record_id": "R1",
+                "submitted_at": "2026-09-16 08:00",
+                "action_required": "true",
+                "extracted_action": "設備を確認する",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+            {
+                "record_id": "R2",
+                "submitted_at": "2026-09-16 09:00",
+                "action_required": "true",
+                "extracted_action": "設備を　確認する。",
+                "extracted_assignee": "鈴木",
+                "extracted_deadline": "2026-09-16 17:00",
+                "extracted_priority": "中",
+            },
+        ]
+
+        results = audit_records(records, duplicate_window_hours=24)
+
+        self.assertEqual(results[0]["duplicate_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(results[1]["duplicate_audit_status"], "NEEDS_REVIEW")
+
+    def test_action_required_false_is_not_applicable(self) -> None:
+        record = {
+            "record_id": "R1",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "false",
+        }
+
+        result = audit_record(record)
+
+        self.assertEqual(result["duplicate_audit_status"], "NOT_APPLICABLE")
+
+    def test_missing_assignee_is_not_applicable(self) -> None:
+        record = {
+            "record_id": "R1",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "設備を確認する",
+            "extracted_assignee": "",
+            "extracted_deadline": "2026-09-16 17:00",
+        }
+
+        result = audit_record(record)
+
+        self.assertEqual(result["duplicate_audit_status"], "NOT_APPLICABLE")
+
+    def test_unparseable_submitted_at_is_unknown(self) -> None:
+        record = {
+            "record_id": "R1",
+            "submitted_at": "",
+            "action_required": "true",
+            "extracted_action": "設備を確認する",
+            "extracted_assignee": "鈴木",
+            "extracted_deadline": "2026-09-16 17:00",
+        }
+
+        result = audit_record(record)
+
+        self.assertEqual(result["duplicate_audit_status"], "UNKNOWN")
 
 
 if __name__ == "__main__":
