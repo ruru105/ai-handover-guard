@@ -60,9 +60,20 @@ class LlmExtractorTest(unittest.TestCase):
         cost = estimate_luna_cost_usd(50_000, 15_000)
         self.assertAlmostEqual(cost, 0.028)
 
-    def test_trial_limit_cannot_exceed_10(self) -> None:
+    def test_trial_limit_cannot_exceed_100(self) -> None:
         with self.assertRaises(ValueError):
-            read_trial_rows(PROJECT_ROOT / "data" / "trial_10.csv", 11)
+            read_trial_rows(PROJECT_ROOT / "data" / "raw_handover.csv", 101)
+
+    def test_trial_limit_allows_up_to_100(self) -> None:
+        rows = read_trial_rows(PROJECT_ROOT / "data" / "raw_handover.csv", 100)
+        self.assertEqual(len(rows), 100)
+
+    def test_default_10_rows_match_original_trial_file(self) -> None:
+        """既定の10件は、従来のtrial_10.csvと内容が変わっていないことを確認する。"""
+
+        from_raw = read_trial_rows(PROJECT_ROOT / "data" / "raw_handover.csv", 10)
+        from_trial_10 = read_trial_rows(PROJECT_ROOT / "data" / "trial_10.csv", 10)
+        self.assertEqual(from_raw, from_trial_10)
 
     def test_removes_honorific_from_assignee(self) -> None:
         self.assertEqual(normalize_assignee("田中さん"), "田中")

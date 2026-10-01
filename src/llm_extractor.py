@@ -1,4 +1,4 @@
-"""OpenAI APIで申し送り原文を構造化する安全な10件試験。"""
+"""OpenAI APIで申し送り原文を構造化する安全な試験(既定10件、上限100件)。"""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from typing import Dict, List
 # ============================================================
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "trial_10.csv"
+DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "raw_handover.csv"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "output" / "ai_predictions.csv"
 USAGE_OUTPUT_PATH = PROJECT_ROOT / "output" / "api_usage.csv"
 DEFAULT_MODEL = "gpt-5.6-luna"
-MAX_TRIAL_RECORDS = 10
+MAX_TRIAL_RECORDS = 100
 MAX_OUTPUT_TOKENS_PER_RECORD = 300
 
 # 2026-09-16時点のGPT-5.6 Luna標準API料金（100万トークン当たり）
@@ -116,7 +116,7 @@ def estimate_luna_cost_usd(input_tokens: int, output_tokens: int) -> float:
 # ============================================================
 
 def read_trial_rows(path: Path, limit: int) -> List[Dict[str, str]]:
-    """試験データを読み込み、安全上限の10件以内に制限する。"""
+    """試験データを読み込み、安全上限の100件以内に制限する。"""
 
     if not 1 <= limit <= MAX_TRIAL_RECORDS:
         raise ValueError(f"試験実行は1～{MAX_TRIAL_RECORDS}件に制限されています")
@@ -143,7 +143,7 @@ def write_csv(path: Path, rows: List[Dict[str, str]]) -> None:
 # ============================================================
 
 def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
-    """明示的に許可された場合だけ、最大10件をAPIへ送信する。"""
+    """明示的に許可された場合だけ、最大100件をAPIへ送信する。"""
 
     from dotenv import load_dotenv
     from openai import OpenAI
@@ -217,7 +217,7 @@ def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
 def main() -> None:
     """通常は確認だけ行い、--execute指定時だけ有料APIを呼び出す。"""
 
-    parser = argparse.ArgumentParser(description="申し送りAI抽出の10件試験")
+    parser = argparse.ArgumentParser(description="申し送りAI抽出の試験(既定10件、上限100件)")
     parser.add_argument("--limit", type=int, default=10)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
