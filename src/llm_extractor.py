@@ -6,7 +6,7 @@ import argparse
 import csv
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 
 # ============================================================
@@ -142,17 +142,36 @@ def write_csv(path: Path, rows: List[Dict[str, str]]) -> None:
 # 5. 有料API実行
 # ============================================================
 
-def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
-    """明示的に許可された場合だけ、最大100件をAPIへ送信する。"""
+def create_openai_client():
+    """APIキーを環境変数(.env)から読み、自動再試行なしのクライアントを作る。
+
+    キーが無い場合はRuntimeErrorにする(キーの値はどこにも表示しない)。
+    """
 
     from dotenv import load_dotenv
     from openai import OpenAI
-    from pydantic import BaseModel
-    from typing import Literal
 
     load_dotenv(PROJECT_ROOT / ".env")
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEYが設定されていません")
+
+    # 自動再試行を無効にして、想定外の重複課金を防ぐ
+    return OpenAI(max_retries=0, timeout=30.0)
+
+
+def extract_records(
+    client,
+    rows: List[Dict[str, str]],
+    model: str,
+) -> Tuple[List[Dict[str, str]], int, int]:
+    """渡されたクライアントで申し送りを1件ずつ構造化し、(出力行, 入力トークン, 出力トークン)を返す。
+
+    CLIとAPIサーバーの両方から使う共通処理。clientを引数にしているため、
+    テストでは本物のAPIの代わりに偽のクライアントを渡せる。
+    """
+
+    from pydantic import BaseModel
+    from typing import Literal
 
     class HandoverExtraction(BaseModel):
         action: str
@@ -161,8 +180,6 @@ def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
         priority: Literal["低", "中", "高"]
         action_required: bool
 
-    # 自動再試行を無効にして、想定外の重複課金を防ぐ
-    client = OpenAI(max_retries=0, timeout=30.0)
     output_rows: List[Dict[str, str]] = []
     total_input_tokens = 0
     total_output_tokens = 0
@@ -185,6 +202,17 @@ def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
         if response.usage:
             total_input_tokens += response.usage.input_tokens
             total_output_tokens += response.usage.output_tokens
+
+    return output_rows, total_input_tokens, total_output_tokens
+
+
+def execute_paid_trial(rows: List[Dict[str, str]], model: str) -> None:
+    """明示的に許可された場合だけ、最大100件をAPIへ送信する。"""
+
+    client = create_openai_client()
+    output_rows, total_input_tokens, total_output_tokens = extract_records(
+        client, rows, model
+    )
 
     write_csv(DEFAULT_OUTPUT_PATH, output_rows)
 

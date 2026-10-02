@@ -1,0 +1,248 @@
+"""やること抜けチェッカー V0.6 - FastAPIによるAPIサーバー。
+
+提供するAPI:
+  GET  /health   : 動作確認
+  POST /audit    : AI抽出済みの申し送りを監査する(追加課金なし)
+  POST /overdue  : 監査したうえで、期限超過(要確認)の分だけを返す(追加課金なし)
+  POST /extract  : 申し送りの原文からAIで「やること・担当・期限」を取り出す(有料API)
+
+起動(作品のフォルダで):
+  python -m uvicorn api:app --app-dir src
+
+APIキーはサーバー側の.envにだけ置き、リクエストやレスポンスには出しません。
+認証機能は付けていないため、自分のパソコン内(127.0.0.1)での利用に限ってください。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Dict, List, Optional, Union
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from audit_rules import (
+    DATETIME_FORMAT,
+    DEFAULT_DUPLICATE_WINDOW_HOURS,
+    DEFAULT_HIGH_PRIORITY_SLA_HOURS,
+    audit_records,
+)
+from llm_extractor import (
+    DEFAULT_MODEL,
+    create_openai_client,
+    estimate_luna_cost_usd,
+    extract_records,
+)
+
+
+# ============================================================
+# 1. 安全設定
+# ============================================================
+
+MAX_AUDIT_RECORDS = 500
+MAX_EXTRACT_RECORDS = 10
+
+app = FastAPI(
+    title="やること抜けチェッカー API",
+    description="申し送りの抜け・期限超過・重複候補を監査し、原文からの抽出もできる。",
+    version="0.6.0",
+)
+
+
+# ============================================================
+# 2. リクエストの形
+# ============================================================
+
+class ExtractedRecord(BaseModel):
+    """AI抽出済みの1件(監査の入力)。"""
+
+    record_id: str
+    submitted_at: str = Field(description="登録日時。YYYY-MM-DD HH:MM")
+    source_department: str = ""
+    message_text: str = ""
+    extracted_action: str = ""
+    extracted_assignee: str = ""
+    extracted_deadline: str = ""
+    extracted_priority: str = Field(default="", description="低 / 中 / 高")
+    action_required: Union[bool, str] = Field(description="対応が必要か(true / false)")
+
+
+class AuditRequest(BaseModel):
+    records: List[ExtractedRecord] = Field(min_length=1, max_length=MAX_AUDIT_RECORDS)
+    as_of: Optional[str] = Field(
+        default=None,
+        description="期限超過を判定する基準日時(YYYY-MM-DD HH:MM)。省略時は現在時刻",
+    )
+    sla_hours: float = Field(default=DEFAULT_HIGH_PRIORITY_SLA_HOURS, gt=0)
+    duplicate_window_hours: float = Field(default=DEFAULT_DUPLICATE_WINDOW_HOURS, gt=0)
+
+
+class RawRecord(BaseModel):
+    """申し送りの原文1件(AI抽出の入力)。"""
+
+    record_id: str
+    submitted_at: str = Field(description="登録日時。YYYY-MM-DD HH:MM")
+    source_department: str = ""
+    message_text: str = Field(min_length=1)
+
+
+class ExtractRequest(BaseModel):
+    records: List[RawRecord] = Field(min_length=1, max_length=MAX_EXTRACT_RECORDS)
+    model: str = DEFAULT_MODEL
+    confirm_paid_api: bool = Field(
+        default=False,
+        description="有料のAPI通信を実行してよい場合だけtrueにする",
+    )
+
+
+# ============================================================
+# 3. 共通処理
+# ============================================================
+
+def parse_as_of(value: Optional[str]) -> datetime:
+    """基準日時の文字列を読み取る。省略時は現在時刻。"""
+
+    if value is None:
+        return datetime.now()
+    try:
+        return datetime.strptime(value.strip(), DATETIME_FORMAT)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail="as_ofは「YYYY-MM-DD HH:MM」の形式で指定してください",
+        )
+
+
+def to_audit_input(record: ExtractedRecord) -> Dict[str, str]:
+    """リクエストの1件を、監査ルールが読む文字列だけの辞書へ変換する。"""
+
+    data = record.model_dump()
+    data["action_required"] = str(data["action_required"]).lower()
+    return {key: str(value) for key, value in data.items()}
+
+
+def run_audit_request(request: AuditRequest) -> tuple[datetime, List[Dict[str, str]]]:
+    """監査リクエストを実行し、(基準日時, 監査結果)を返す。"""
+
+    as_of = parse_as_of(request.as_of)
+    results = audit_records(
+        [to_audit_input(record) for record in request.records],
+        as_of,
+        request.sla_hours,
+        request.duplicate_window_hours,
+    )
+    return as_of, results
+
+
+def count_status(results: List[Dict[str, str]], field: str, status: str) -> int:
+    """指定の判定項目が、指定の状態になっている件数を数える。"""
+
+    return sum(result.get(field) == status for result in results)
+
+
+# ============================================================
+# 4. エンドポイント
+# ============================================================
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """動作確認用。"""
+
+    return {"status": "ok", "version": app.version}
+
+
+@app.post("/audit")
+def audit(request: AuditRequest) -> Dict[str, object]:
+    """AI抽出済みの申し送りを監査する。追加課金はない。"""
+
+    as_of, results = run_audit_request(request)
+    return {
+        "as_of": as_of.strftime(DATETIME_FORMAT),
+        "count": len(results),
+        "summary": {
+            "ready": count_status(results, "audit_status", "READY"),
+            "needs_review": count_status(results, "audit_status", "NEEDS_REVIEW"),
+            "info_only": count_status(results, "audit_status", "INFO_ONLY"),
+            "overdue": count_status(results, "sla_audit_status", "NEEDS_REVIEW"),
+            "duplicate_candidates": count_status(
+                results, "duplicate_audit_status", "NEEDS_REVIEW"
+            ),
+            "priority_mismatch": count_status(
+                results, "priority_audit_status", "NEEDS_REVIEW"
+            ),
+        },
+        "results": results,
+    }
+
+
+@app.post("/overdue")
+def overdue(request: AuditRequest) -> Dict[str, object]:
+    """監査したうえで、期限超過(要確認)の分だけを返す。追加課金はない。"""
+
+    as_of, results = run_audit_request(request)
+    overdue_items = [
+        {
+            "record_id": result["record_id"],
+            "submitted_at": result["submitted_at"],
+            "extracted_assignee": result["extracted_assignee"],
+            "extracted_action": result["extracted_action"],
+            "extracted_deadline": result["extracted_deadline"],
+            "rule_priority": result["rule_priority"],
+            "sla_audit_message": result["sla_audit_message"],
+        }
+        for result in results
+        if result.get("sla_audit_status") == "NEEDS_REVIEW"
+    ]
+    return {
+        "as_of": as_of.strftime(DATETIME_FORMAT),
+        "total_records": len(results),
+        "count": len(overdue_items),
+        "overdue": overdue_items,
+    }
+
+
+@app.post("/extract")
+def extract(request: ExtractRequest) -> Dict[str, object]:
+    """申し送りの原文からAIで抽出する。有料API通信を行う。
+
+    安全のため、confirm_paid_apiがtrueでなければ通信しない。1回あたりの件数にも上限がある。
+    """
+
+    if not request.confirm_paid_api:
+        raise HTTPException(
+            status_code=400,
+            detail="有料のAPI通信です。実行する場合は confirm_paid_api を true にしてください",
+        )
+
+    try:
+        client = create_openai_client()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="サーバー側でAPIキーが設定されていません(.envを確認してください)",
+        )
+
+    rows = [record.model_dump() for record in request.records]
+    try:
+        extracted, input_tokens, output_tokens = extract_records(
+            client, rows, request.model
+        )
+    except Exception:
+        # 例外の中身(キーや通信内容を含む可能性)は返さない
+        raise HTTPException(status_code=502, detail="AIによる抽出に失敗しました")
+
+    cost_usd: Optional[float] = (
+        estimate_luna_cost_usd(input_tokens, output_tokens)
+        if request.model == DEFAULT_MODEL
+        else None
+    )
+    return {
+        "model": request.model,
+        "count": len(extracted),
+        "records": extracted,
+        "usage": {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "estimated_cost_usd": cost_usd,
+        },
+    }
