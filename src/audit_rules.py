@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from excel_report import write_audit_xlsx
+
 
 # ============================================================
 # 1. パス設定
@@ -382,7 +384,12 @@ def main() -> None:
     print(f"要確認: {needs_review_count}件")
     print(f"期限超過の要確認: {sla_review_count}件")
     print(f"重複候補の要確認: {duplicate_review_count}件")
-    print(f"出力先: {args.output.resolve()}")
+    print(f"出力先(CSV): {args.output.resolve()}")
+
+    # 人が読むためのExcel版(日本語見出し・列幅調整つき)を同じ場所に作る
+    xlsx_path = args.output.with_suffix(".xlsx")
+    write_audit_xlsx(xlsx_path, audited_records)
+    print(f"出力先(Excel): {xlsx_path.resolve()}")
 
 
 if __name__ == "__main__":

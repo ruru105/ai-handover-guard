@@ -43,7 +43,8 @@ data/mock_ai_output.csv    ← 現段階の模擬AI回答
         ↓
 src/audit_rules.py         ← 不足項目を監査
         ↓
-output/audit_result.csv
+output/audit_result.csv    ← 機械が読む結果(英語の項目名)
+output/audit_result.xlsx   ← 人が読むExcel版(日本語見出し・列幅調整つき)
         ↓
 src/evaluate_predictions.py ← 正解表と比較
         ↓
@@ -57,6 +58,15 @@ output/evaluation_details.csv ← どの項目が違ったかを確認
 python src/audit_rules.py
 python src/evaluate_predictions.py
 ```
+
+`audit_rules.py`は、監査結果を`output/audit_result.csv`(評価処理が読む元データ)と、人が読むための`output/audit_result.xlsx`の両方へ出力します。Excel版は次のように作っています(`src/excel_report.py`)。
+
+- 1行目に英語の項目名(小さい灰色)、2行目に日本語見出しを置く
+- 総合判定などの値は「`NEEDS_REVIEW`(要確認)」のように英語と日本語を併記する
+- 列幅は内容に合わせて自動で調整し、長い文は2行に折り返して列が横に伸びすぎないようにする
+- 行の高さをそろえ、見出し行と識別番号の列を固定し、日本語見出し行に絞り込みボタンを付ける
+
+Excel版はCSVから作り直せるため、GitHubには含めていません(`output/`は除外)。
 
 実際のAI回答を追加課金なしで監査・評価する場合：
 
