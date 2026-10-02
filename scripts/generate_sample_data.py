@@ -1,4 +1,4 @@
-"""AI Handover Guard用の架空申し送りデータ100件を生成する。"""
+"""やること抜けチェッカー用の架空申し送りデータ100件を生成する。"""
 
 from __future__ import annotations
 

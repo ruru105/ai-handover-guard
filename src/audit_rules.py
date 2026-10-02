@@ -1,4 +1,4 @@
-"""AI Handover Guard V0.3 - 申し送り抽出結果の監査。"""
+"""やること抜けチェッカー V0.3 - 申し送り抽出結果の監査。"""
 
 from __future__ import annotations
 

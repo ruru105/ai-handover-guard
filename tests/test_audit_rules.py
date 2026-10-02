@@ -1,4 +1,4 @@
-"""AI Handover Guard V0.1〜V0.4 の監査ルールテスト。"""
+"""やること抜けチェッカー V0.1〜V0.4 の監査ルールテスト。"""
 
 import csv
 import sys

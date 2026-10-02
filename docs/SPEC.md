@@ -1,10 +1,10 @@
-# AI Handover Guard 仕様書 V0.3
+# やること抜けチェッカー 仕様書 V0.3
 
 ## 1. 作品の位置づけ
 
 - 大分類：AI Business Workflow Automation
-- 作品名：AI Handover Guard
-- 日本語名：AI引き継ぎ漏れ防止ツール
+- 作品名：Action Item Checker
+- 日本語名：やること抜けチェッカー(旧称：AI Handover Guard / AI引き継ぎ漏れ防止ツール)
 - 目的：申し送り文章から次の行動を抽出し、担当・期限・作業内容などの不足を警告する
 
 ## 2. 誰でも理解できる一文仕様
