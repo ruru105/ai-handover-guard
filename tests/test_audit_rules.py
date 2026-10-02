@@ -15,6 +15,7 @@ from audit_rules import (  # noqa: E402
     audit_record,
     audit_records,
     determine_rule_priority,
+    parse_deadline,
 )
 
 
@@ -237,6 +238,55 @@ class SlaAuditTest(unittest.TestCase):
         result = audit_record(record, as_of=datetime(2026, 9, 20, 8, 0))
 
         self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE")
+
+    def _date_only_record(self, deadline: str = "2026-09-18") -> dict:
+        return {
+            "message_text": "発注番号の数量を確認してください",
+            "submitted_at": "2026-09-16 08:00",
+            "action_required": "true",
+            "extracted_action": "仕入先へ確認する",
+            "extracted_assignee": "",
+            "extracted_deadline": deadline,
+            "extracted_priority": "中",
+        }
+
+    def test_date_only_deadline_is_overdue_after_that_day(self) -> None:
+        result = audit_record(self._date_only_record(), as_of=datetime(2026, 9, 20, 9, 0))
+
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+        self.assertIn("日付のみ", result["sla_audit_message"])
+
+    def test_date_only_deadline_is_valid_until_end_of_that_day(self) -> None:
+        result = audit_record(self._date_only_record(), as_of=datetime(2026, 9, 18, 23, 59))
+
+        self.assertEqual(result["sla_audit_status"], "ON_TIME")
+
+    def test_date_only_deadline_is_overdue_from_next_midnight(self) -> None:
+        result = audit_record(self._date_only_record(), as_of=datetime(2026, 9, 19, 0, 0))
+
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+
+    def test_unreadable_deadline_is_still_not_applicable(self) -> None:
+        for bad in ("来週中", "2026/09/18", "2026-09-18 25:00"):
+            result = audit_record(self._date_only_record(bad), as_of=datetime(2026, 9, 20, 9, 0))
+            self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE", bad)
+
+    def test_deadline_with_time_keeps_existing_behavior(self) -> None:
+        record = self._date_only_record("2026-09-18 17:00")
+
+        before = audit_record(record, as_of=datetime(2026, 9, 18, 16, 59))
+        after = audit_record(record, as_of=datetime(2026, 9, 18, 17, 1))
+
+        self.assertEqual(before["sla_audit_status"], "ON_TIME")
+        self.assertEqual(after["sla_audit_status"], "NEEDS_REVIEW")
+        self.assertNotIn("日付のみ", after["sla_audit_message"])
+
+    def test_parse_deadline_distinguishes_date_only(self) -> None:
+        self.assertEqual(parse_deadline("2026-09-18 17:00"), (datetime(2026, 9, 18, 17, 0), False))
+        deadline, date_only = parse_deadline("2026-09-18")
+        self.assertTrue(date_only)
+        self.assertEqual(deadline.date(), datetime(2026, 9, 18).date())
+        self.assertEqual(parse_deadline(""), (None, False))
 
 
 class DuplicateAuditTest(unittest.TestCase):

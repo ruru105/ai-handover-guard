@@ -6,7 +6,7 @@ import argparse
 import csv
 import re
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -54,6 +54,9 @@ LOW_PRIORITY_KEYWORDS = (
 # 申し送りの日時項目の書式（登録日時・期限とも共通）
 DATETIME_FORMAT = "%Y-%m-%d %H:%M"
 
+# 期限に時刻がなく日付だけのとき(AIが日付のみで出力した場合など)の書式
+DATE_ONLY_FORMAT = "%Y-%m-%d"
+
 # 緊急度「高」は、文中の期限に関わらず、登録から何時間以内に着手すべきかの目安。
 # サンプル値であり、実運用では業種・組織に合わせて調整する（--sla-hoursで上書き可能）。
 DEFAULT_HIGH_PRIORITY_SLA_HOURS = 4.0
@@ -80,6 +83,24 @@ def parse_datetime(value: str) -> Optional[datetime]:
         return datetime.strptime(value.strip(), DATETIME_FORMAT)
     except (ValueError, AttributeError):
         return None
+
+
+def parse_deadline(value: str) -> Tuple[Optional[datetime], bool]:
+    """期限の文字列を読み取り、(期限の日時, 日付のみだったか)を返す。読めない場合は(None, False)。
+
+    「YYYY-MM-DD HH:MM」はその時刻を期限とする。時刻のない「YYYY-MM-DD」は、その日の終わり
+    (翌日0時の直前)まで有効とする。時刻を勝手に決めて誤警告を出さないための扱い。
+    """
+
+    exact = parse_datetime(value)
+    if exact is not None:
+        return exact, False
+
+    try:
+        day = datetime.strptime(value.strip(), DATE_ONLY_FORMAT)
+    except (ValueError, AttributeError):
+        return None, False
+    return day + timedelta(days=1) - timedelta(microseconds=1), True
 
 
 def determine_rule_priority(record: Dict[str, str]) -> str:
@@ -154,16 +175,20 @@ def add_sla_audit(
             result["sla_audit_message"] = "緊急度「高」の目安時間内です"
         return
 
-    deadline = parse_datetime(result.get("extracted_deadline", ""))
+    deadline, date_only = parse_deadline(result.get("extracted_deadline", ""))
     if deadline is None:
         result["sla_audit_status"] = "NOT_APPLICABLE"
         result["sla_audit_message"] = "期限が未確定のため判定できません"
     elif as_of > deadline:
         result["sla_audit_status"] = "NEEDS_REVIEW"
-        result["sla_audit_message"] = "文中の期限を過ぎています"
+        result["sla_audit_message"] = (
+            "文中の期限(日付のみ)の日が終わっています" if date_only else "文中の期限を過ぎています"
+        )
     else:
         result["sla_audit_status"] = "ON_TIME"
-        result["sla_audit_message"] = "文中の期限内です"
+        result["sla_audit_message"] = (
+            "文中の期限(日付のみ)の日の終わりまで有効です" if date_only else "文中の期限内です"
+        )
 
 
 def normalize_for_duplicate_match(value: str) -> str:
