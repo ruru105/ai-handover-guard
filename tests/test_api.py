@@ -1,6 +1,7 @@
 """やること抜けチェッカー V0.6 のAPIテスト。本物のAPI通信は一切行わない。"""
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import api  # noqa: E402
+import history_store  # noqa: E402
 
 client = TestClient(api.app)
 
@@ -231,6 +233,62 @@ class ExtractEndpointTest(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 502)
         self.assertNotIn("sk-12345", response.text)
+
+
+class HistoryEndpointTest(unittest.TestCase):
+    """履歴(SQLite)を使うAPI。テストごとに一時フォルダのデータベースを使う。"""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patcher = mock.patch.object(history_store, "DEFAULT_DB_PATH", Path(tmp.name) / "history.db")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_history_starts_empty(self) -> None:
+        self.assertEqual(client.get("/history").json(), {"count": 0})
+
+    def test_audit_saves_records_and_reports_counts(self) -> None:
+        body = {"records": [make_record("H1")], "as_of": "2026-09-16 12:00"}
+        data = client.post("/history/audit", json=body).json()
+        self.assertTrue(data["saved"])
+        self.assertEqual(data["stored_total"], 1)
+        self.assertEqual(data["history_compared"], 0)
+        self.assertEqual(client.get("/history").json(), {"count": 1})
+
+    def test_duplicate_across_requests_is_detected(self) -> None:
+        first = {"records": [make_record("H1")], "as_of": "2026-09-16 12:00"}
+        second = {"records": [make_record("H2", submitted_at="2026-09-16 09:10")], "as_of": "2026-09-16 12:00"}
+        client.post("/history/audit", json=first)
+        data = client.post("/history/audit", json=second).json()
+        self.assertEqual(data["history_compared"], 1)
+        self.assertEqual(data["summary"]["duplicate_candidates"], 1)
+        self.assertIn("H1", data["results"][0]["duplicate_audit_message"])
+
+    def test_plain_audit_ignores_saved_history(self) -> None:
+        body = {"records": [make_record("H1")], "as_of": "2026-09-16 12:00"}
+        client.post("/history/audit", json=body)
+        other = {"records": [make_record("H2", submitted_at="2026-09-16 09:10")], "as_of": "2026-09-16 12:00"}
+        plain = client.post("/audit", json=other).json()
+        self.assertEqual(plain["summary"]["duplicate_candidates"], 0)
+        self.assertEqual(client.get("/history").json(), {"count": 1})
+
+    def test_save_false_compares_without_saving(self) -> None:
+        client.post("/history/audit", json={"records": [make_record("H1")], "as_of": "2026-09-16 12:00"})
+        body = {
+            "records": [make_record("H2", submitted_at="2026-09-16 09:10")],
+            "as_of": "2026-09-16 12:00",
+            "save": False,
+        }
+        data = client.post("/history/audit", json=body).json()
+        self.assertFalse(data["saved"])
+        self.assertEqual(data["summary"]["duplicate_candidates"], 1)
+        self.assertEqual(client.get("/history").json(), {"count": 1})
+
+    def test_validation_errors_do_not_save(self) -> None:
+        body = {"records": [make_record("H1")], "as_of": "bad"}
+        self.assertEqual(client.post("/history/audit", json=body).status_code, 422)
+        self.assertEqual(client.get("/history").json(), {"count": 0})
 
 
 if __name__ == "__main__":

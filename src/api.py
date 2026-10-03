@@ -1,10 +1,12 @@
-"""やること抜けチェッカー V0.6 - FastAPIによるAPIサーバー。
+"""やること抜けチェッカー V0.7 - FastAPIによるAPIサーバー。
 
 提供するAPI:
   GET  /health   : 動作確認
   POST /audit    : AI抽出済みの申し送りを監査する(追加課金なし)
   POST /overdue  : 監査したうえで、期限超過(要確認)の分だけを返す(追加課金なし)
   POST /extract  : 申し送りの原文からAIで「やること・担当・期限」を取り出す(有料API)
+  POST /history/audit : 保存済みの履歴とも比べて監査し、新しい記録を保存する(追加課金なし)
+  GET  /history  : 保存している件数
 
 起動(作品のフォルダで):
   python -m uvicorn api:app --app-dir src
@@ -27,6 +29,8 @@ from audit_rules import (
     DEFAULT_HIGH_PRIORITY_SLA_HOURS,
     audit_records,
 )
+import history_store
+from history_store import HistoryStore, audit_with_history
 from llm_extractor import (
     DEFAULT_MODEL,
     create_openai_client,
@@ -45,7 +49,7 @@ MAX_EXTRACT_RECORDS = 10
 app = FastAPI(
     title="やること抜けチェッカー API",
     description="申し送りの抜け・期限超過・重複候補を監査し、原文からの抽出もできる。",
-    version="0.6.0",
+    version="0.7.0",
 )
 
 
@@ -75,6 +79,13 @@ class AuditRequest(BaseModel):
     )
     sla_hours: float = Field(default=DEFAULT_HIGH_PRIORITY_SLA_HOURS, gt=0)
     duplicate_window_hours: float = Field(default=DEFAULT_DUPLICATE_WINDOW_HOURS, gt=0)
+
+
+class HistoryAuditRequest(AuditRequest):
+    save: bool = Field(
+        default=True,
+        description="監査のあとで、今回の記録を履歴に保存する(falseなら保存せず、比べるだけ)",
+    )
 
 
 class RawRecord(BaseModel):
@@ -151,28 +162,66 @@ def health() -> Dict[str, str]:
     return {"status": "ok", "version": app.version}
 
 
+def summarize(results: List[Dict[str, str]]) -> Dict[str, int]:
+    """監査結果の件数のまとめ。"""
+
+    return {
+        "ready": count_status(results, "audit_status", "READY"),
+        "needs_review": count_status(results, "audit_status", "NEEDS_REVIEW"),
+        "info_only": count_status(results, "audit_status", "INFO_ONLY"),
+        "overdue": count_status(results, "sla_audit_status", "NEEDS_REVIEW"),
+        "duplicate_candidates": count_status(results, "duplicate_audit_status", "NEEDS_REVIEW"),
+        "priority_mismatch": count_status(results, "priority_audit_status", "NEEDS_REVIEW"),
+    }
+
+
 @app.post("/audit")
 def audit(request: AuditRequest) -> Dict[str, object]:
-    """AI抽出済みの申し送りを監査する。追加課金はない。"""
+    """AI抽出済みの申し送りを監査する。追加課金はない。履歴の保存・参照はしない。"""
 
     as_of, results = run_audit_request(request)
     return {
         "as_of": as_of.strftime(DATETIME_FORMAT),
         "count": len(results),
-        "summary": {
-            "ready": count_status(results, "audit_status", "READY"),
-            "needs_review": count_status(results, "audit_status", "NEEDS_REVIEW"),
-            "info_only": count_status(results, "audit_status", "INFO_ONLY"),
-            "overdue": count_status(results, "sla_audit_status", "NEEDS_REVIEW"),
-            "duplicate_candidates": count_status(
-                results, "duplicate_audit_status", "NEEDS_REVIEW"
-            ),
-            "priority_mismatch": count_status(
-                results, "priority_audit_status", "NEEDS_REVIEW"
-            ),
-        },
+        "summary": summarize(results),
         "results": results,
     }
+
+
+@app.post("/history/audit")
+def history_audit(request: HistoryAuditRequest) -> Dict[str, object]:
+    """保存済みの履歴とも比べて監査する(重複候補は過去分ともまたがって調べる)。
+
+    saveがtrueなら、監査のあとで今回の記録を履歴に保存する(同じrecord_idは置き換え)。
+    追加課金はない。
+    """
+
+    as_of = parse_as_of(request.as_of)
+    store = HistoryStore(history_store.DEFAULT_DB_PATH)
+    results, history_compared = audit_with_history(
+        store,
+        [to_audit_input(record) for record in request.records],
+        as_of,
+        request.sla_hours,
+        request.duplicate_window_hours,
+        save=request.save,
+    )
+    return {
+        "as_of": as_of.strftime(DATETIME_FORMAT),
+        "count": len(results),
+        "history_compared": history_compared,
+        "saved": request.save,
+        "stored_total": store.count(),
+        "summary": summarize(results),
+        "results": results,
+    }
+
+
+@app.get("/history")
+def history() -> Dict[str, int]:
+    """保存している履歴の件数。"""
+
+    return {"count": HistoryStore(history_store.DEFAULT_DB_PATH).count()}
 
 
 @app.post("/overdue")

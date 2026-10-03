@@ -3,4 +3,5 @@ __pycache__/
 .env
 output/*.csv
 output/*.xlsx
+output/*.db
 !output/.gitkeep
