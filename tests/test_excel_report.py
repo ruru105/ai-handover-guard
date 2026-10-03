@@ -3,6 +3,7 @@
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -158,6 +159,37 @@ class ExcelReportTest(unittest.TestCase):
     def test_empty_records_rejected(self) -> None:
         with self.assertRaises(ValueError):
             write_audit_xlsx(Path(self.tmp.name) / "x.xlsx", [])
+
+
+class ExcelFormulaSafetyTest(unittest.TestCase):
+    """外部由来の文字列(申し送りの原文など)が、Excelの数式として保存されないことを確認する。"""
+
+    DANGEROUS = ["=1+1", "=HYPERLINK(\"http://example.com\",\"x\")", "+1+1", "-1+1", "@SUM(1,1)"]
+
+    def _write(self, text: str) -> Path:
+        record = audit_records(read_csv(PROJECT_ROOT / "data" / "mock_ai_output.csv"))[0]
+        record = dict(record, message_text=text, extracted_action=text)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "out.xlsx"
+        write_audit_xlsx(path, [record])
+        return path
+
+    def test_text_starting_with_formula_characters_is_stored_as_text(self) -> None:
+        for text in self.DANGEROUS:
+            with self.subTest(text=text):
+                path = self._write(text)
+                sheet = load_workbook(path).active
+                values = [cell for row in sheet.iter_rows() for cell in row if cell.value == text]
+                self.assertTrue(values, "文字として残っていること")
+                for cell in values:
+                    self.assertEqual(cell.data_type, "s")
+
+    def test_no_formula_element_in_saved_xml(self) -> None:
+        path = self._write("=1+1")
+        with zipfile.ZipFile(path) as archive:
+            xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        self.assertNotIn("<f>", xml)
 
 
 if __name__ == "__main__":

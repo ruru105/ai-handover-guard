@@ -291,5 +291,28 @@ class HistoryEndpointTest(unittest.TestCase):
         self.assertEqual(client.get("/history").json(), {"count": 0})
 
 
+class RecordIdRulesTest(unittest.TestCase):
+    """IDの空欄・重複は、どの監査入口でも入力エラー(422)にする。"""
+
+    def test_duplicate_ids_are_rejected_by_all_audit_endpoints(self) -> None:
+        records = [make_record("R1"), make_record("R1", extracted_action="別の作業")]
+        for path in ("/audit", "/overdue", "/history/audit"):
+            with self.subTest(path=path):
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+                    history_store, "DEFAULT_DB_PATH", Path(tmp) / "h.db"
+                ):
+                    response = client.post(path, json={"records": records, "as_of": "2026-09-16 12:00"})
+                    self.assertEqual(response.status_code, 422)
+                    self.assertEqual(client.get("/history").json(), {"count": 0})
+
+    def test_empty_id_is_rejected(self) -> None:
+        body = {"records": [make_record("")], "as_of": "2026-09-16 12:00"}
+        self.assertEqual(client.post("/audit", json=body).status_code, 422)
+
+    def test_empty_id_is_rejected_for_extract_too(self) -> None:
+        body = {"records": [dict(raw_record(), record_id="")], "confirm_paid_api": True}
+        self.assertEqual(client.post("/extract", json=body).status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()

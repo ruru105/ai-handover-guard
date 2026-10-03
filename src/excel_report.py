@@ -116,6 +116,18 @@ def calculate_column_width(english: str, japanese: str, values: List[str]) -> fl
 # 3. Excel出力
 # ============================================================
 
+def as_text_cell(cell):
+    """文字列のセルを、数式として解釈されない文字セルに固定する。
+
+    openpyxlは「=」で始まる文字列を数式として保存する。申し送りの原文のような外部由来の
+    文字列が数式になることを防ぐため、文字列は必ず文字セルとして保存する。
+    """
+
+    if isinstance(cell.value, str):
+        cell.data_type = "s"
+    return cell
+
+
 def write_audit_xlsx(path: Path, records: List[Dict[str, str]]) -> None:
     """1行目に英語の項目名、2行目に日本語見出しを置いたExcelを出力する。"""
 
@@ -134,10 +146,10 @@ def write_audit_xlsx(path: Path, records: List[Dict[str, str]]) -> None:
     cell_alignment = Alignment(wrap_text=True, vertical="center")
 
     for index, column in enumerate(columns, start=1):
-        english_cell = sheet.cell(row=ENGLISH_ROW, column=index, value=column)
+        english_cell = as_text_cell(sheet.cell(row=ENGLISH_ROW, column=index, value=column))
         english_cell.font = english_font
-        japanese_cell = sheet.cell(
-            row=JAPANESE_ROW, column=index, value=JAPANESE_LABELS.get(column, column)
+        japanese_cell = as_text_cell(
+            sheet.cell(row=JAPANESE_ROW, column=index, value=JAPANESE_LABELS.get(column, column))
         )
         japanese_cell.font = japanese_font
         japanese_cell.fill = japanese_fill
@@ -145,8 +157,12 @@ def write_audit_xlsx(path: Path, records: List[Dict[str, str]]) -> None:
 
     for row_offset, record in enumerate(records):
         for index, column in enumerate(columns, start=1):
-            cell = sheet.cell(
-                row=FIRST_DATA_ROW + row_offset, column=index, value=display_value(column, record.get(column, ""))
+            cell = as_text_cell(
+                sheet.cell(
+                    row=FIRST_DATA_ROW + row_offset,
+                    column=index,
+                    value=display_value(column, record.get(column, "")),
+                )
             )
             cell.alignment = cell_alignment
 

@@ -38,6 +38,22 @@ RECORD_FIELDS = (
 )
 
 
+def validate_record_ids(records: Iterable[Dict[str, str]]) -> None:
+    """記録のIDが空でないこと、同じ回の中で重複していないことを確認する。
+
+    同じIDを2件保存すると、後の1件だけが残って履歴が黙って消えるため、保存の前に止める。
+    """
+
+    seen = set()
+    for record in records:
+        record_id = str(record.get("record_id", "")).strip()
+        if not record_id:
+            raise ValueError("record_idが空の記録があります")
+        if record_id in seen:
+            raise ValueError(f"record_idが重複しています: {record_id}")
+        seen.add(record_id)
+
+
 class HistoryStore:
     """申し送り履歴の保存先。record_idが同じ記録は、新しい内容で置き換える。"""
 
@@ -65,6 +81,8 @@ class HistoryStore:
     def upsert(self, records: Iterable[Dict[str, str]]) -> int:
         """記録を保存する(同じrecord_idは置き換え)。保存した件数を返す。"""
 
+        records = list(records)
+        validate_record_ids(records)
         saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         rows = [
             tuple(str(record.get(field, "")) for field in RECORD_FIELDS) + (saved_at,)
@@ -114,6 +132,7 @@ def audit_with_history(
     saveがTrueなら、監査のあとで新しい記録を履歴に保存する。
     """
 
+    validate_record_ids(new_records)
     new_ids = {record["record_id"] for record in new_records}
     submitted_times = [parse_datetime(record.get("submitted_at", "")) for record in new_records]
     submitted_times = [time for time in submitted_times if time is not None]

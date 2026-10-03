@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from audit_rules import audit_records  # noqa: E402
-from history_store import HistoryStore, audit_with_history  # noqa: E402
+from history_store import HistoryStore, audit_with_history, validate_record_ids  # noqa: E402
 
 
 def make_record(record_id: str, submitted_at: str, assignee: str = "田中",
@@ -170,6 +170,30 @@ class AuditWithHistoryTest(StoreTestCase):
             whole = everything[result["record_id"]]
             self.assertEqual(result["duplicate_audit_status"], whole["duplicate_audit_status"], result["record_id"])
             self.assertEqual(result["duplicate_audit_message"], whole["duplicate_audit_message"], result["record_id"])
+
+
+class RecordIdValidationTest(StoreTestCase):
+    def test_duplicate_ids_in_one_batch_are_rejected_and_nothing_saved(self) -> None:
+        batch = [make_record("R1", "2026-09-16 08:00"), make_record("R1", "2026-09-16 09:00", action="別の作業")]
+        with self.assertRaises(ValueError):
+            self.store.upsert(batch)
+        with self.assertRaises(ValueError):
+            audit_with_history(self.store, batch, AS_OF)
+        self.assertEqual(self.store.count(), 0)
+
+    def test_empty_or_blank_id_is_rejected(self) -> None:
+        for bad in ("", "   "):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    validate_record_ids([make_record(bad, "2026-09-16 08:00")])
+
+    def test_unique_ids_pass(self) -> None:
+        validate_record_ids([make_record("A", "2026-09-16 08:00"), make_record("B", "2026-09-16 09:00")])
+
+    def test_updating_an_existing_id_in_a_later_batch_is_still_allowed(self) -> None:
+        self.store.upsert([make_record("A", "2026-09-16 08:00", assignee="田中")])
+        self.store.upsert([make_record("A", "2026-09-16 08:00", assignee="佐藤")])
+        self.assertEqual(self.store.count(), 1)
 
 
 if __name__ == "__main__":

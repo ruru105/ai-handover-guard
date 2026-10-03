@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from audit_rules import (
     DATETIME_FORMAT,
@@ -30,7 +30,7 @@ from audit_rules import (
     audit_records,
 )
 import history_store
-from history_store import HistoryStore, audit_with_history
+from history_store import HistoryStore, audit_with_history, validate_record_ids
 from llm_extractor import (
     DEFAULT_MODEL,
     create_openai_client,
@@ -60,7 +60,7 @@ app = FastAPI(
 class ExtractedRecord(BaseModel):
     """AI抽出済みの1件(監査の入力)。"""
 
-    record_id: str
+    record_id: str = Field(min_length=1)
     submitted_at: str = Field(description="登録日時。YYYY-MM-DD HH:MM")
     source_department: str = ""
     message_text: str = ""
@@ -80,6 +80,16 @@ class AuditRequest(BaseModel):
     sla_hours: float = Field(default=DEFAULT_HIGH_PRIORITY_SLA_HOURS, gt=0)
     duplicate_window_hours: float = Field(default=DEFAULT_DUPLICATE_WINDOW_HOURS, gt=0)
 
+    @model_validator(mode="after")
+    def check_record_ids(self) -> "AuditRequest":
+        """同じ回の中で、record_idが重複していないこと(重複すると結果や履歴が混ざる)。"""
+
+        try:
+            validate_record_ids([{"record_id": record.record_id} for record in self.records])
+        except ValueError as error:
+            raise ValueError(str(error))
+        return self
+
 
 class HistoryAuditRequest(AuditRequest):
     save: bool = Field(
@@ -91,7 +101,7 @@ class HistoryAuditRequest(AuditRequest):
 class RawRecord(BaseModel):
     """申し送りの原文1件(AI抽出の入力)。"""
 
-    record_id: str
+    record_id: str = Field(min_length=1)
     submitted_at: str = Field(description="登録日時。YYYY-MM-DD HH:MM")
     source_department: str = ""
     message_text: str = Field(min_length=1)
