@@ -144,6 +144,46 @@ class AuditEndpointTest(unittest.TestCase):
         self.assertEqual(client.post("/audit", json=body).status_code, 422)
 
 
+class OverallStatusEndpointTest(unittest.TestCase):
+    """総合判定(overall_status)と、対応要否の誤記の扱い。"""
+
+    AS_OF = "2026-09-16 12:00"
+
+    def test_overdue_record_is_overall_needs_review_even_if_fields_complete(self) -> None:
+        record = make_record(extracted_deadline="2026-09-16 09:00")
+        data = client.post("/audit", json={"records": [record], "as_of": self.AS_OF}).json()
+        self.assertEqual(data["results"][0]["audit_status"], "READY")
+        self.assertEqual(data["results"][0]["overall_status"], "NEEDS_REVIEW")
+        self.assertEqual(data["summary"]["ready"], 1)
+        self.assertEqual(data["summary"]["overall_ready"], 0)
+        self.assertEqual(data["summary"]["overall_needs_review"], 1)
+
+    def test_clean_record_is_overall_ready(self) -> None:
+        data = client.post("/audit", json={"records": [make_record()], "as_of": self.AS_OF}).json()
+        self.assertEqual(data["results"][0]["overall_status"], "READY")
+        self.assertEqual(data["summary"]["overall_ready"], 1)
+        self.assertEqual(data["summary"]["overall_needs_review"], 0)
+
+    def test_misspelled_action_required_is_rejected(self) -> None:
+        for bad in ("tru", "maybe", ""):
+            record = make_record(action_required=bad)
+            response = client.post("/audit", json={"records": [record], "as_of": self.AS_OF})
+            self.assertEqual(response.status_code, 422, repr(bad))
+            self.assertIn("action_required", response.text)
+
+    def test_misspelled_action_required_is_rejected_by_other_endpoints_too(self) -> None:
+        record = make_record(action_required="tru")
+        for path in ("/overdue", "/history/audit"):
+            response = client.post(path, json={"records": [record], "as_of": self.AS_OF})
+            self.assertEqual(response.status_code, 422, path)
+
+    def test_accepted_spellings_of_action_required(self) -> None:
+        for good in (True, False, "true", "FALSE", " yes ", "0"):
+            record = make_record(action_required=good)
+            response = client.post("/audit", json={"records": [record], "as_of": self.AS_OF})
+            self.assertEqual(response.status_code, 200, repr(good))
+
+
 class OverdueEndpointTest(unittest.TestCase):
     def test_returns_only_overdue_records(self) -> None:
         body = {

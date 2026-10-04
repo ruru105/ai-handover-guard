@@ -266,10 +266,17 @@ class SlaAuditTest(unittest.TestCase):
 
         self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
 
-    def test_unreadable_deadline_is_still_not_applicable(self) -> None:
+    def test_unreadable_deadline_is_unknown_and_needs_review_overall(self) -> None:
+        # 期限が書かれているのに読めない場合は、「判定対象外」ではなく「判定不能」にして要確認へ回す。
         for bad in ("来週中", "2026/09/18", "2026-09-18 25:00"):
             result = audit_record(self._date_only_record(bad), as_of=datetime(2026, 9, 20, 9, 0))
-            self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE", bad)
+            self.assertEqual(result["sla_audit_status"], "UNKNOWN", bad)
+            self.assertEqual(result["overall_status"], "NEEDS_REVIEW", bad)
+            self.assertIn(bad, result["sla_audit_message"])
+
+    def test_empty_deadline_is_still_not_applicable(self) -> None:
+        result = audit_record(self._date_only_record(""), as_of=datetime(2026, 9, 20, 9, 0))
+        self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE")
 
     def test_deadline_with_time_keeps_existing_behavior(self) -> None:
         record = self._date_only_record("2026-09-18 17:00")
@@ -442,6 +449,107 @@ class DuplicateAuditTest(unittest.TestCase):
         result = audit_record(record)
 
         self.assertEqual(result["duplicate_audit_status"], "UNKNOWN")
+
+
+class OverallStatusTest(unittest.TestCase):
+    """総合判定(overall_status)。項目の充足(audit_status)とは別に、期限超過・重複なども見る。"""
+
+    AS_OF = datetime(2026, 9, 20, 9, 0)
+
+    @staticmethod
+    def _record(record_id: str = "O1", **overrides) -> dict:
+        record = {
+            "record_id": record_id,
+            "submitted_at": "2026-09-19 08:00",
+            "source_department": "製造",
+            "message_text": "田中さん、部品Aの在庫を確認してください",
+            "extracted_action": "部品Aの在庫を確認する",
+            "extracted_assignee": "田中",
+            "extracted_deadline": "2026-09-25 15:00",
+            "extracted_priority": "中",
+            "action_required": "true",
+        }
+        record.update(overrides)
+        return record
+
+    def test_h01_overdue_is_not_overall_ready(self) -> None:
+        result = audit_records([self._record(extracted_deadline="2026-09-19 17:00")], self.AS_OF)[0]
+        self.assertEqual(result["audit_status"], "READY")  # 項目の充足は従来どおり
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("期限超過", result["overall_message"])
+
+    def test_clean_record_is_overall_ready(self) -> None:
+        result = audit_records([self._record()], self.AS_OF)[0]
+        self.assertEqual(result["audit_status"], "READY")
+        self.assertEqual(result["overall_status"], "READY")
+
+    def test_duplicate_candidate_is_overall_needs_review(self) -> None:
+        results = audit_records(
+            [self._record("D1"), self._record("D2", submitted_at="2026-09-19 10:00")], self.AS_OF
+        )
+        for result in results:
+            self.assertEqual(result["audit_status"], "READY")
+            self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+            self.assertIn("重複候補", result["overall_message"])
+
+    def test_priority_mismatch_is_overall_needs_review(self) -> None:
+        result = audit_records([self._record(extracted_priority="高")], self.AS_OF)[0]
+        self.assertEqual(result["priority_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("優先度の不一致", result["overall_message"])
+
+    def test_missing_field_is_overall_needs_review(self) -> None:
+        result = audit_records([self._record(extracted_assignee="")], self.AS_OF)[0]
+        self.assertEqual(result["audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("項目不足", result["overall_message"])
+
+    def test_h02_unreadable_submitted_at_is_not_overall_ready(self) -> None:
+        result = audit_records([self._record(submitted_at="昨日")], self.AS_OF)[0]
+        self.assertEqual(result["audit_status"], "READY")
+        self.assertEqual(result["sla_audit_status"], "UNKNOWN")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("判定不能", result["overall_message"])
+
+    def test_info_only_stays_info_only(self) -> None:
+        result = audit_records([self._record(action_required="false")], self.AS_OF)[0]
+        self.assertEqual(result["audit_status"], "INFO_ONLY")
+        self.assertEqual(result["overall_status"], "INFO_ONLY")
+
+    def test_h03_misspelled_action_required_is_not_info_only(self) -> None:
+        for bad in ("tru", "maybe", "", "  "):
+            result = audit_records([self._record(action_required=bad)], self.AS_OF)[0]
+            self.assertEqual(result["audit_status"], "NEEDS_REVIEW", repr(bad))
+            self.assertEqual(result["overall_status"], "NEEDS_REVIEW", repr(bad))
+            self.assertEqual(result["missing_fields"], "対応要否", repr(bad))
+            self.assertEqual(result["sla_audit_status"], "UNKNOWN", repr(bad))
+            self.assertIn("対応要否", result["overall_message"], repr(bad))
+
+    def test_h03_accepted_spellings_still_work(self) -> None:
+        for good in ("true", "TRUE", " yes ", "1", "Y"):
+            result = audit_records([self._record(action_required=good)], self.AS_OF)[0]
+            self.assertNotEqual(result["audit_status"], "INFO_ONLY", good)
+        for good in ("false", "FALSE", " no ", "0", "N"):
+            result = audit_records([self._record(action_required=good)], self.AS_OF)[0]
+            self.assertEqual(result["audit_status"], "INFO_ONLY", good)
+
+    def test_all_records_have_the_same_columns(self) -> None:
+        """CSV・Excelは先頭行の項目名で列を決めるため、どの種類の結果も同じ項目を持つこと。"""
+
+        results = audit_records(
+            [
+                self._record("K1"),
+                self._record("K2", action_required="false"),
+                self._record("K3", action_required="tru"),
+                self._record("K4", extracted_assignee=""),
+            ],
+            self.AS_OF,
+        )
+        key_sets = {frozenset(result.keys()) for result in results}
+        self.assertEqual(len(key_sets), 1)
+        self.assertIn("overall_status", results[0])
+        self.assertIn("overall_message", results[0])
 
 
 if __name__ == "__main__":

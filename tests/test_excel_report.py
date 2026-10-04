@@ -54,7 +54,8 @@ class ExcelReportTest(unittest.TestCase):
     def test_key_headings_are_the_agreed_japanese_words(self) -> None:
         self.assertEqual(JAPANESE_LABELS["record_id"], "識別番号")
         self.assertEqual(JAPANESE_LABELS["extracted_assignee"], "抽出した担当者")
-        self.assertEqual(JAPANESE_LABELS["audit_status"], "総合判定")
+        self.assertEqual(JAPANESE_LABELS["audit_status"], "項目の充足")
+        self.assertEqual(JAPANESE_LABELS["overall_status"], "総合判定")
 
     def test_all_records_written_from_row3(self) -> None:
         self.assertEqual(self.sheet.max_row, 2 + len(self.records))
@@ -125,9 +126,12 @@ class ExcelReportTest(unittest.TestCase):
         self.assertTrue(self.sheet.auto_filter.ref.startswith("A2:"))
 
     def test_status_values_show_english_and_japanese(self) -> None:
-        self.assertEqual(display_value("audit_status", "NEEDS_REVIEW"), "NEEDS_REVIEW(要確認)")
-        self.assertEqual(display_value("audit_status", "READY"), "READY(問題なし)")
-        self.assertEqual(display_value("audit_status", "INFO_ONLY"), "INFO_ONLY(共有のみ)")
+        self.assertEqual(display_value("overall_status", "NEEDS_REVIEW"), "NEEDS_REVIEW(要確認)")
+        self.assertEqual(display_value("overall_status", "READY"), "READY(問題なし)")
+        self.assertEqual(display_value("overall_status", "INFO_ONLY"), "INFO_ONLY(共有のみ)")
+        # 「項目の充足」は、総合判定と間違えないよう別の言葉で表示する
+        self.assertEqual(display_value("audit_status", "NEEDS_REVIEW"), "NEEDS_REVIEW(不足あり)")
+        self.assertEqual(display_value("audit_status", "READY"), "READY(そろっている)")
         self.assertEqual(display_value("sla_audit_status", "ON_TIME"), "ON_TIME(期限内)")
         self.assertEqual(display_value("action_required", "true"), "true(対応が必要)")
 
@@ -137,13 +141,19 @@ class ExcelReportTest(unittest.TestCase):
         self.assertEqual(display_value("audit_status", "OTHER"), "OTHER")
 
     def test_sheet_cells_show_both_languages(self) -> None:
-        col = self.columns.index("audit_status") + 1
+        col = self.columns.index("overall_status") + 1
         shown = {self.sheet.cell(row=r, column=col).value for r in range(3, self.sheet.max_row + 1)}
         self.assertTrue(all("(" in v for v in shown))
         self.assertIn("NEEDS_REVIEW(要確認)", shown)
+        fill_col = self.columns.index("audit_status") + 1
+        fill_shown = {
+            self.sheet.cell(row=r, column=fill_col).value for r in range(3, self.sheet.max_row + 1)
+        }
+        self.assertTrue(all("(" in v for v in fill_shown))
+        self.assertNotIn("READY(問題なし)", fill_shown)
 
     def test_status_column_wide_enough_for_both_languages(self) -> None:
-        col = self.columns.index("audit_status") + 1
+        col = self.columns.index("overall_status") + 1
         letter = self.sheet.cell(row=1, column=col).column_letter
         self.assertGreaterEqual(
             self.sheet.column_dimensions[letter].width, display_width("NEEDS_REVIEW(要確認)")

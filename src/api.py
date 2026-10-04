@@ -21,13 +21,14 @@ from datetime import datetime
 from typing import Dict, List, Optional, Union
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from audit_rules import (
     DATETIME_FORMAT,
     DEFAULT_DUPLICATE_WINDOW_HOURS,
     DEFAULT_HIGH_PRIORITY_SLA_HOURS,
     audit_records,
+    parse_action_required,
 )
 import history_store
 from history_store import HistoryStore, audit_with_history, validate_record_ids
@@ -69,6 +70,15 @@ class ExtractedRecord(BaseModel):
     extracted_deadline: str = ""
     extracted_priority: str = Field(default="", description="低 / 中 / 高")
     action_required: Union[bool, str] = Field(description="対応が必要か(true / false)")
+
+    @field_validator("action_required")
+    @classmethod
+    def check_action_required(cls, value: Union[bool, str]) -> Union[bool, str]:
+        """true/falseのどちらにも読めない値(誤記・空欄)は、黙って対応不要にせず受け付けない。"""
+
+        if parse_action_required(value) is None:
+            raise ValueError("action_requiredは true / false のどちらかで指定してください")
+        return value
 
 
 class AuditRequest(BaseModel):
@@ -173,12 +183,18 @@ def health() -> Dict[str, str]:
 
 
 def summarize(results: List[Dict[str, str]]) -> Dict[str, int]:
-    """監査結果の件数のまとめ。"""
+    """監査結果の件数のまとめ。
+
+    ready / needs_review / info_only は「項目の充足」(audit_status)の件数。
+    overall_ready / overall_needs_review が、期限超過・重複・優先度の不一致なども含めた総合判定の件数。
+    """
 
     return {
         "ready": count_status(results, "audit_status", "READY"),
         "needs_review": count_status(results, "audit_status", "NEEDS_REVIEW"),
         "info_only": count_status(results, "audit_status", "INFO_ONLY"),
+        "overall_ready": count_status(results, "overall_status", "READY"),
+        "overall_needs_review": count_status(results, "overall_status", "NEEDS_REVIEW"),
         "overdue": count_status(results, "sla_audit_status", "NEEDS_REVIEW"),
         "duplicate_candidates": count_status(results, "duplicate_audit_status", "NEEDS_REVIEW"),
         "priority_mismatch": count_status(results, "priority_audit_status", "NEEDS_REVIEW"),

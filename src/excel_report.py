@@ -35,9 +35,11 @@ JAPANESE_LABELS: Dict[str, str] = {
     "sla_audit_message": "期限超過の理由",
     "duplicate_audit_status": "重複の判定",
     "duplicate_audit_message": "重複の理由",
-    "audit_status": "総合判定",
+    "audit_status": "項目の充足",
     "missing_fields": "不足項目",
-    "audit_message": "総合判定の理由",
+    "audit_message": "項目の充足の理由",
+    "overall_status": "総合判定",
+    "overall_message": "総合判定の理由",
 }
 
 # 判定結果などの値は「英語(日本語)」の形で表示する。
@@ -45,6 +47,12 @@ JAPANESE_LABELS: Dict[str, str] = {
 _REVIEW_STATUS = {
     "READY": "問題なし",
     "NEEDS_REVIEW": "要確認",
+    "INFO_ONLY": "共有のみ",
+}
+# 「項目の充足」は、作業内容・担当者・期限がそろっているかだけを表す(総合判定とは別)
+_FILL_STATUS = {
+    "READY": "そろっている",
+    "NEEDS_REVIEW": "不足あり",
     "INFO_ONLY": "共有のみ",
 }
 _AUDIT_AUX_STATUS = {
@@ -56,7 +64,8 @@ _AUDIT_AUX_STATUS = {
     "UNKNOWN": "判定不能",
 }
 VALUE_LABELS: Dict[str, Dict[str, str]] = {
-    "audit_status": _REVIEW_STATUS,
+    "audit_status": _FILL_STATUS,
+    "overall_status": _REVIEW_STATUS,
     "priority_audit_status": _AUDIT_AUX_STATUS,
     "sla_audit_status": _AUDIT_AUX_STATUS,
     "duplicate_audit_status": _AUDIT_AUX_STATUS,

@@ -70,10 +70,28 @@ DEFAULT_DUPLICATE_WINDOW_HOURS = 24.0
 # 2. 共通変換
 # ============================================================
 
+TRUE_VALUES = {"true", "1", "yes", "y"}
+FALSE_VALUES = {"false", "0", "no", "n"}
+
+
 def to_bool(value: str) -> bool:
     """CSVの真偽値表現をPythonのboolへ変換する。"""
 
-    return value.strip().lower() in {"true", "1", "yes", "y"}
+    return value.strip().lower() in TRUE_VALUES
+
+
+def parse_action_required(value: object) -> Optional[bool]:
+    """対応要否を読み取る。true/falseのどちらにも読めない値(誤記・空欄)はNoneを返す。
+
+    誤記を黙って「対応不要」として扱わないために、to_boolとは別に用意している。
+    """
+
+    text = str(value).strip().lower()
+    if text in TRUE_VALUES:
+        return True
+    if text in FALSE_VALUES:
+        return False
+    return None
 
 
 def parse_datetime(value: str) -> Optional[datetime]:
@@ -175,8 +193,14 @@ def add_sla_audit(
             result["sla_audit_message"] = "緊急度「高」の目安時間内です"
         return
 
-    deadline, date_only = parse_deadline(result.get("extracted_deadline", ""))
-    if deadline is None:
+    deadline_text = result.get("extracted_deadline", "").strip()
+    deadline, date_only = parse_deadline(deadline_text)
+    if deadline is None and deadline_text:
+        result["sla_audit_status"] = "UNKNOWN"
+        result["sla_audit_message"] = (
+            f"期限の書式(YYYY-MM-DD HH:MM または YYYY-MM-DD)を読み取れないため判定できません(値: {deadline_text})"
+        )
+    elif deadline is None:
         result["sla_audit_status"] = "NOT_APPLICABLE"
         result["sla_audit_message"] = "期限が未確定のため判定できません"
     elif as_of > deadline:
@@ -261,6 +285,57 @@ def mark_duplicate_candidates(
                 )
 
 
+def mark_action_required_unknown(result: Dict[str, str]) -> None:
+    """対応要否がtrue/falseのどちらにも読めないとき、黙って対応不要にせず「要確認」にする。"""
+
+    value = str(result.get("action_required", "")).strip()
+    shown = f"「{value}」" if value else "空欄"
+    reason = f"対応要否(action_required)が{shown}で、true / false のどちらにも読めないため判定できません"
+    result["rule_priority"] = ""
+    for prefix in ("priority", "sla", "duplicate"):
+        result[f"{prefix}_audit_status"] = "UNKNOWN"
+        result[f"{prefix}_audit_message"] = reason
+    result["audit_status"] = "NEEDS_REVIEW"
+    result["missing_fields"] = "対応要否"
+    result["audit_message"] = f"要確認：{reason}"
+
+
+def add_overall_audit(result: Dict[str, str]) -> None:
+    """総合判定(overall_status)を作る。
+
+    audit_statusは「実行に必要な項目(作業内容・担当者・期限)がそろっているか」だけを表す。
+    overall_statusは、それに加えて期限超過・重複候補・優先度の不一致・判定不能も見て、
+    1つでもあれば「要確認」にする。対応不要の共有情報は INFO_ONLY のまま。
+    """
+
+    if result.get("audit_status") == "INFO_ONLY":
+        result["overall_status"] = "INFO_ONLY"
+        result["overall_message"] = "対応不要の共有情報です"
+        return
+
+    reasons = []
+    if result.get("audit_status") == "NEEDS_REVIEW":
+        missing = result.get("missing_fields", "")
+        reasons.append("対応要否が不明" if missing == "対応要否" else f"項目不足({missing})")
+    if result.get("sla_audit_status") == "NEEDS_REVIEW":
+        reasons.append("期限超過")
+    if result.get("duplicate_audit_status") == "NEEDS_REVIEW":
+        reasons.append("重複候補")
+    if result.get("priority_audit_status") == "NEEDS_REVIEW":
+        reasons.append("優先度の不一致")
+    if result.get("missing_fields", "") != "対応要否" and any(
+        result.get(f"{prefix}_audit_status") == "UNKNOWN" for prefix in ("priority", "sla", "duplicate")
+    ):
+        reasons.append("日時の形式などが読めず判定不能")
+
+    if reasons:
+        result["overall_status"] = "NEEDS_REVIEW"
+        result["overall_message"] = "要確認：" + "・".join(reasons)
+    else:
+        result["overall_status"] = "READY"
+        result["overall_message"] = "項目がそろい、期限超過・重複候補・優先度の不一致もありません"
+
+
 # ============================================================
 # 3. 1件分の監査
 # ============================================================
@@ -273,6 +348,12 @@ def audit_record(
     """1件の申し送りを監査し、状態と警告理由を追加する。"""
 
     result = dict(record)
+
+    if parse_action_required(record.get("action_required", "")) is None:
+        mark_action_required_unknown(result)
+        add_overall_audit(result)
+        return result
+
     add_priority_audit(result)
     add_sla_audit(result, as_of or datetime.now(), sla_hours)
     set_default_duplicate_audit(result)
@@ -281,6 +362,7 @@ def audit_record(
         result["audit_status"] = "INFO_ONLY"
         result["missing_fields"] = ""
         result["audit_message"] = "対応不要の共有情報です"
+        add_overall_audit(result)
         return result
 
     missing_labels = [
@@ -298,6 +380,7 @@ def audit_record(
         result["missing_fields"] = ""
         result["audit_message"] = "実行に必要な基本項目がそろっています"
 
+    add_overall_audit(result)
     return result
 
 
@@ -316,6 +399,9 @@ def audit_records(
     as_of = as_of or datetime.now()
     audited_records = [audit_record(record, as_of, sla_hours) for record in records]
     mark_duplicate_candidates(audited_records, duplicate_window_hours)
+    # 重複候補は複数件を比べたあとで決まるため、総合判定はここで作り直す
+    for record in audited_records:
+        add_overall_audit(record)
     return audited_records
 
 
@@ -406,7 +492,11 @@ def main() -> None:
         record["duplicate_audit_status"] == "NEEDS_REVIEW" for record in audited_records
     )
     print(f"監査完了: {len(audited_records)}件")
-    print(f"要確認: {needs_review_count}件")
+    overall_review_count = sum(
+        record["overall_status"] == "NEEDS_REVIEW" for record in audited_records
+    )
+    print(f"項目不足の要確認: {needs_review_count}件")
+    print(f"総合判定が要確認: {overall_review_count}件")
     print(f"期限超過の要確認: {sla_review_count}件")
     print(f"重複候補の要確認: {duplicate_review_count}件")
     print(f"出力先(CSV): {args.output.resolve()}")
