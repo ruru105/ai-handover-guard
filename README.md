@@ -238,7 +238,7 @@ python scripts/generate_sample_data.py
 - `all_fields_normalized`：対応内容を正規化した上で主要項目がすべて一致した割合
 - `prediction_coverage`：正解表のうち、AIの回答があった件数
 
-**回答がない件は不正解として数えます。** 正解表のすべてのrecord_idが採点の対象で、AIの回答が欠けた件は、全項目「不一致」として分母に入れます(回答が欠けた件だけを外すと、正解率が実際より高く見えるためです)。`prediction_coverage`が100%未満のときは、評価の実行時に「回答がない正解表のID」の件数が表示され、`evaluation_details.csv`には「(回答なし)」の行が残ります。10件試験のように、一部だけを試したときに回答のある件だけを採点したい場合は、`python src/evaluate_predictions.py --allow-partial`(または`python src/run_trial_pipeline.py --allow-partial`)と明示します。同じrecord_idが複数ある場合は、どちらを採点したか分からなくなるため、エラーにします。
+**回答がない件は不正解として数えます。** 正解表のすべてのrecord_idが採点の対象で、AIの回答が欠けた件は、全項目「不一致」として分母に入れます(回答が欠けた件だけを外すと、正解率が実際より高く見えるためです)。`prediction_coverage`が100%未満のときは、評価の実行時に「回答がない正解表のID」の件数が表示され、`evaluation_details.csv`には「(回答なし)」の行が残ります。10件試験のように、一部だけを試したときに回答のある件だけを採点したい場合は、`python src/evaluate_predictions.py --allow-partial`(または`python src/run_trial_pipeline.py --allow-partial`)と明示します。同じrecord_idが複数ある場合は、どちらを採点したか分からなくなるため、エラーにします。なお、**回答がすべて欠けている(空)場合や、正解表と共通のrecord_idが1件もない場合は、0点として出さずにエラーで止まります**(回答ファイルの取り違えや空のファイルの可能性が高く、0点と表示すると原因が分かりにくいためです。`--allow-partial`を付けても同じです)。
 
 ## 開発予定
 

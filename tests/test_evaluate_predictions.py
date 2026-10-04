@@ -15,6 +15,7 @@ from evaluate_predictions import (  # noqa: E402
     MISSING_PREDICTION_LABEL,
     build_details,
     evaluate,
+    main,
     missing_and_extra_ids,
     read_by_id,
     run_evaluation,
@@ -203,6 +204,50 @@ class MissingPredictionTest(unittest.TestCase):
     def test_no_overlap_is_an_error(self) -> None:
         with self.assertRaises(ValueError):
             evaluate(self.expected, {"X999": _correct_prediction()})
+
+    def test_empty_or_unrelated_predictions_stop_with_a_clear_message(self) -> None:
+        # 全件が回答なし(空)・全く別のIDのときは、0点として出さず、原因が分かるメッセージで止める。
+        for predicted in ({}, {"X999": _correct_prediction()}):
+            with self.assertRaises(ValueError) as caught:
+                evaluate(self.expected, predicted)
+            self.assertIn("共通のrecord_id", str(caught.exception))
+            self.assertIn("取り違え", str(caught.exception))
+
+
+class CommandLineErrorTest(unittest.TestCase):
+    """入力に原因があるエラーは、長いエラー表示ではなく、原因を示して終了コード1で止める。"""
+
+    def test_empty_predictions_exit_with_message_and_code_1(self) -> None:
+        import contextlib
+        import io
+
+        with tempfile.TemporaryDirectory() as tmp:
+            expected = Path(tmp) / "expected.csv"
+            predicted = Path(tmp) / "pred.csv"
+            expected.write_text(
+                "record_id,expected_action\nR1,a\n", encoding="utf-8"
+            )
+            predicted.write_text("record_id,extracted_action\n", encoding="utf-8")
+            argv = [
+                "evaluate_predictions.py",
+                "--expected", str(expected),
+                "--predictions", str(predicted),
+                "--summary", str(Path(tmp) / "s.csv"),
+                "--details", str(Path(tmp) / "d.csv"),
+            ]
+            error_output = io.StringIO()
+            old_argv = sys.argv
+            sys.argv = argv
+            try:
+                with contextlib.redirect_stderr(error_output):
+                    with self.assertRaises(SystemExit) as caught:
+                        main()
+            finally:
+                sys.argv = old_argv
+
+        self.assertEqual(caught.exception.code, 1)
+        self.assertIn("エラー:", error_output.getvalue())
+        self.assertIn("共通のrecord_id", error_output.getvalue())
 
 
 class DuplicateIdTest(unittest.TestCase):

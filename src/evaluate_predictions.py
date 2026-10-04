@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import re
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -144,7 +145,10 @@ def scored_ids(
         raise ValueError("正解表にrecord_idがありません")
     common_ids = sorted(set(expected_by_id) & set(predicted_by_id))
     if not common_ids:
-        raise ValueError("比較可能なrecord_idがありません")
+        raise ValueError(
+            "比較可能なrecord_idがありません(正解表と回答に共通のrecord_idが1件もありません。"
+            "回答が空、またはファイルの取り違えの可能性があります)"
+        )
     return common_ids if allow_partial else sorted(expected_by_id)
 
 
@@ -335,13 +339,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    summary = run_evaluation(
-        args.expected,
-        args.predictions,
-        args.summary,
-        args.details,
-        args.allow_partial,
-    )
+    try:
+        summary = run_evaluation(
+            args.expected,
+            args.predictions,
+            args.summary,
+            args.details,
+            args.allow_partial,
+        )
+    except ValueError as error:
+        # 回答が空・IDの取り違え・同じIDの重複など、入力に原因がある場合は、
+        # 長いエラー表示ではなく原因だけを示して終了コード1で止める。
+        print(f"エラー: {error}", file=sys.stderr)
+        raise SystemExit(1)
 
     print("評価完了")
     print_id_report(args.expected, args.predictions, args.allow_partial)
