@@ -169,6 +169,15 @@ class OverallStatusEndpointTest(unittest.TestCase):
         self.assertEqual(reasons["duplicate"], 0)
         self.assertEqual(data["summary"]["overall_needs_review"], 2)
 
+    def test_vague_action_is_counted_as_its_own_reason(self) -> None:
+        vague = make_record(record_id="B1", extracted_action="例の件")
+        concrete = make_record(record_id="B2", extracted_action="伝票を提出する")
+        data = client.post("/audit", json={"records": [vague, concrete], "as_of": self.AS_OF}).json()
+        self.assertEqual(data["summary"]["overall_reasons"]["vague_action"], 1)
+        self.assertEqual(data["results"][0]["vague_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(data["results"][1]["vague_audit_status"], "CLEAR")
+        self.assertEqual(data["summary"]["overall_needs_review"], 1)
+
     def test_overall_reasons_are_zero_for_clean_record(self) -> None:
         data = client.post("/audit", json={"records": [make_record()], "as_of": self.AS_OF}).json()
         self.assertEqual(sum(data["summary"]["overall_reasons"].values()), 0)

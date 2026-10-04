@@ -226,6 +226,96 @@ def add_sla_audit(
         )
 
 
+# ============================================================
+# 曖昧な作業内容の検出
+# ============================================================
+
+# 「例の件」のように、何を指すのか原文を読まないと分からない言い方
+VAGUE_REFERENCE_WORDS = (
+    "例の件", "あの件", "その件", "この件", "先日の件", "前回の件", "いつもの件", "さっきの件",
+    "例のやつ", "あのやつ", "いつものやつ", "例の話", "あの話", "その話", "例のもの", "例のあれ",
+    "例の", "あの", "その", "この", "いつもの", "さっきの", "先日の", "前回の",
+    "あれ", "それ", "これ", "やつ",
+)
+
+# 動詞・依頼の言い回しだけで、何を対象にするのかが書かれていない言葉
+GENERIC_ACTION_WORDS = (
+    "お願いします", "お願い", "よろしくお願いします", "よろしく", "ください", "くださ", "頼む", "頼みます",
+    "しておいて", "しておく", "しておきます", "やっておいて", "やっておく", "やっておきます",
+    "対応", "確認", "連絡", "処理", "調整", "検討", "共有", "手配", "準備", "実施", "対処",
+    "報告", "相談", "フォロー", "進める", "進めて", "やる", "やって", "します", "する", "して",
+    "おく", "ます", "です", "ね", "よ",
+)
+
+_PARTICLES = "をにはがでともへのや"
+_PUNCTUATION_PATTERN = r"[\s　。、，,.!！?？・「」『』()（）\[\]【】~〜ー-]+"
+
+
+def _build_removal_pattern(words: Tuple[str, ...]) -> "re.Pattern[str]":
+    ordered = sorted(words, key=len, reverse=True)
+    return re.compile("|".join(re.escape(word) for word in ordered))
+
+
+_VAGUE_REFERENCE_PATTERN = _build_removal_pattern(VAGUE_REFERENCE_WORDS)
+_GENERIC_ACTION_PATTERN = _build_removal_pattern(GENERIC_ACTION_WORDS)
+
+
+def detect_vague_action(action: str) -> Optional[str]:
+    """作業内容が曖昧なら、理由の種類("reference" / "generic")を返す。具体的ならNone。
+
+    「例の件」「あれをお願いします」のように指す対象が分からない言い方(reference)と、
+    「確認する」「対応」のように動詞だけで何をするのか分からない言い方(generic)を見つける。
+    指示語や動詞を取り除いたあとに、対象を表す言葉が何も残らなければ曖昧とみなす。
+    「部品Aの在庫を確認する」のように、対象が書かれていれば曖昧とはみなさない。
+    """
+
+    text = re.sub(_PUNCTUATION_PATTERN, "", action or "")
+    if not text:
+        return None
+
+    has_reference = _VAGUE_REFERENCE_PATTERN.search(text) is not None
+    remainder = _VAGUE_REFERENCE_PATTERN.sub("", text)
+    remainder = _GENERIC_ACTION_PATTERN.sub("", remainder)
+    remainder = "".join(ch for ch in remainder if ch not in _PARTICLES)
+    if remainder:
+        return None
+    return "reference" if has_reference else "generic"
+
+
+def add_vague_audit(result: Dict[str, str]) -> None:
+    """作業内容が、誰が読んでも実行できるほど具体的に書かれているかを確認する。
+
+    項目の充足(audit_status)は「空欄でないか」だけを見るため、「例の件」のような
+    空欄ではないが中身のない作業内容を通してしまう。それを別の判定として拾う。
+    """
+
+    if not to_bool(result.get("action_required", "")):
+        result["vague_audit_status"] = "NOT_APPLICABLE"
+        result["vague_audit_message"] = "対応不要のため対象外です"
+        return
+
+    action = result.get("extracted_action", "").strip()
+    if not action:
+        result["vague_audit_status"] = "NOT_APPLICABLE"
+        result["vague_audit_message"] = "作業内容が未確定のため判定できません(項目の充足で確認します)"
+        return
+
+    kind = detect_vague_action(action)
+    if kind == "reference":
+        result["vague_audit_status"] = "NEEDS_REVIEW"
+        result["vague_audit_message"] = (
+            f"作業内容「{action}」は、指す対象が分かりません。何を・どの案件かを具体的にしてください"
+        )
+    elif kind == "generic":
+        result["vague_audit_status"] = "NEEDS_REVIEW"
+        result["vague_audit_message"] = (
+            f"作業内容「{action}」は、動詞だけで対象が分かりません。何を対象にするかを具体的にしてください"
+        )
+    else:
+        result["vague_audit_status"] = "CLEAR"
+        result["vague_audit_message"] = "作業内容に、対象が具体的に書かれています"
+
+
 def normalize_for_duplicate_match(value: str) -> str:
     """重複候補の比較用に、空白・句読点をそろえる。"""
 
@@ -306,6 +396,8 @@ def mark_action_required_unknown(result: Dict[str, str]) -> None:
     for prefix in ("priority", "sla", "duplicate"):
         result[f"{prefix}_audit_status"] = "UNKNOWN"
         result[f"{prefix}_audit_message"] = reason
+    result["vague_audit_status"] = "NOT_APPLICABLE"
+    result["vague_audit_message"] = "対応要否が不明のため判定できません"
     result["audit_status"] = "NEEDS_REVIEW"
     result["missing_fields"] = "対応要否"
     result["audit_message"] = f"要確認：{reason}"
@@ -317,6 +409,7 @@ OVERALL_REASON_LABELS = {
     "overdue": "期限超過",
     "duplicate": "重複候補",
     "priority_mismatch": "優先度の不一致",
+    "vague_action": "作業内容が曖昧",
     "unreadable": "日時の形式などが読めず判定不能",
 }
 
@@ -340,6 +433,8 @@ def overall_reason_codes(result: Dict[str, str]) -> List[Tuple[str, str]]:
         codes.append(("duplicate", OVERALL_REASON_LABELS["duplicate"]))
     if result.get("priority_audit_status") == "NEEDS_REVIEW":
         codes.append(("priority_mismatch", OVERALL_REASON_LABELS["priority_mismatch"]))
+    if result.get("vague_audit_status") == "NEEDS_REVIEW":
+        codes.append(("vague_action", OVERALL_REASON_LABELS["vague_action"]))
     if result.get("missing_fields", "") != "対応要否" and any(
         result.get(f"{prefix}_audit_status") == "UNKNOWN" for prefix in ("priority", "sla", "duplicate")
     ):
@@ -391,6 +486,7 @@ def audit_record(
     add_priority_audit(result)
     add_sla_audit(result, as_of or datetime.now(), sla_hours)
     set_default_duplicate_audit(result)
+    add_vague_audit(result)
 
     if not to_bool(record.get("action_required", "")):
         result["audit_status"] = "INFO_ONLY"

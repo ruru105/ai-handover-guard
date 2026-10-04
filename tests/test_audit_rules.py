@@ -15,6 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from audit_rules import (  # noqa: E402
     audit_record,
     audit_records,
+    detect_vague_action,
     determine_rule_priority,
     parse_deadline,
 )
@@ -590,6 +591,90 @@ class OverallStatusTest(unittest.TestCase):
         self.assertIn("overall_message", results[0])
 
 
+class VagueActionTest(unittest.TestCase):
+    """曖昧な作業内容(「例の件」「確認する」など)を、空欄とは別に見つける。"""
+
+    AS_OF = datetime(2026, 9, 20, 9, 0)
+
+    @staticmethod
+    def _record(**overrides) -> dict:
+        record = {
+            "record_id": "V1",
+            "submitted_at": "2026-09-19 08:00",
+            "source_department": "製造",
+            "message_text": "田中さん、例の件お願いします",
+            "extracted_action": "部品Aの在庫を確認する",
+            "extracted_assignee": "田中",
+            "extracted_deadline": "2026-09-25 15:00",
+            "extracted_priority": "中",
+            "action_required": "true",
+        }
+        record.update(overrides)
+        return record
+
+    def test_reference_words_without_a_target_are_vague(self) -> None:
+        for action in ("例の件", "例の件を確認する", "あの件、お願いします", "それをやっておく", "これを確認"):
+            with self.subTest(action=action):
+                self.assertEqual(detect_vague_action(action), "reference")
+
+    def test_verb_only_actions_are_vague(self) -> None:
+        for action in ("確認する", "対応", "確認をお願いします", "連絡して", "調整する", "よろしく"):
+            with self.subTest(action=action):
+                self.assertEqual(detect_vague_action(action), "generic")
+
+    def test_actions_with_a_concrete_target_are_not_vague(self) -> None:
+        for action in (
+            "部品Aの在庫を確認する",
+            "取引先へ請求金額を確認する",
+            "例の部品Aの件を確認する",
+            "先日の請求書の件を確認する",
+            "この部品を確認",
+            "前回の見積を確認",
+            "シフトの調整",
+            "お客様に連絡する",
+        ):
+            with self.subTest(action=action):
+                self.assertIsNone(detect_vague_action(action))
+
+    def test_empty_action_is_not_judged_here(self) -> None:
+        self.assertIsNone(detect_vague_action(""))
+        self.assertIsNone(detect_vague_action("  　"))
+
+    def test_vague_action_makes_overall_needs_review_but_not_fill_status(self) -> None:
+        result = audit_records([self._record(extracted_action="例の件")], self.AS_OF)[0]
+        self.assertEqual(result["vague_audit_status"], "NEEDS_REVIEW")
+        self.assertIn("例の件", result["vague_audit_message"])
+        # 空欄ではないので、項目の充足は従来どおり「そろっている」
+        self.assertEqual(result["audit_status"], "READY")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("作業内容が曖昧", result["overall_message"])
+
+    def test_concrete_action_is_clear_and_overall_ready(self) -> None:
+        result = audit_records([self._record()], self.AS_OF)[0]
+        self.assertEqual(result["vague_audit_status"], "CLEAR")
+        self.assertEqual(result["overall_status"], "READY")
+
+    def test_not_applicable_for_info_only_empty_action_and_unknown_flag(self) -> None:
+        info = audit_records([self._record(action_required="false", extracted_action="例の件")], self.AS_OF)[0]
+        self.assertEqual(info["vague_audit_status"], "NOT_APPLICABLE")
+        self.assertEqual(info["overall_status"], "INFO_ONLY")
+
+        empty = audit_records([self._record(extracted_action="")], self.AS_OF)[0]
+        self.assertEqual(empty["vague_audit_status"], "NOT_APPLICABLE")
+        self.assertEqual(empty["audit_status"], "NEEDS_REVIEW")  # 空欄は項目の充足が拾う
+        self.assertNotIn("作業内容が曖昧", empty["overall_message"])
+
+        unknown = audit_records([self._record(action_required="たぶん", extracted_action="例の件")], self.AS_OF)[0]
+        self.assertEqual(unknown["vague_audit_status"], "NOT_APPLICABLE")
+        self.assertNotIn("作業内容が曖昧", unknown["overall_message"])
+
+    def test_vague_reason_is_listed_with_other_reasons(self) -> None:
+        record = self._record(extracted_action="確認する", extracted_deadline="2026-09-19 17:00")
+        result = audit_records([record], self.AS_OF)[0]
+        self.assertIn("期限超過", result["overall_message"])
+        self.assertIn("作業内容が曖昧", result["overall_message"])
+
+
 class ExcelSafeCsvOutputTest(unittest.TestCase):
     """コマンドで監査したとき、採点用CSVは元のまま、Excelで開く用のCSVは数式が無効になること。"""
 
@@ -616,10 +701,10 @@ class ExcelSafeCsvOutputTest(unittest.TestCase):
                 capture_output=True, text=True, encoding="utf-8", env=child_env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            machine = list(csv.DictReader(output.open(encoding="utf-8-sig", newline="")))
-            safe = list(csv.DictReader(
-                (tmp_path / "audit_result_for_excel.csv").open(encoding="utf-8-sig", newline="")
-            ))
+            with output.open(encoding="utf-8-sig", newline="") as machine_file:
+                machine = list(csv.DictReader(machine_file))
+            with (tmp_path / "audit_result_for_excel.csv").open(encoding="utf-8-sig", newline="") as safe_file:
+                safe = list(csv.DictReader(safe_file))
         # 採点・再読み込みに使う元のCSVは、原文のまま(書き換えない)
         self.assertEqual(machine[0]["message_text"], "=1+1")
         self.assertEqual(machine[0]["extracted_action"], "=HYPERLINK(1)")
