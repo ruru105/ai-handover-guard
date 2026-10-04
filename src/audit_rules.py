@@ -311,6 +311,42 @@ def mark_action_required_unknown(result: Dict[str, str]) -> None:
     result["audit_message"] = f"要確認：{reason}"
 
 
+OVERALL_REASON_LABELS = {
+    "missing_fields": "項目不足",
+    "action_required_unknown": "対応要否が不明",
+    "overdue": "期限超過",
+    "duplicate": "重複候補",
+    "priority_mismatch": "優先度の不一致",
+    "unreadable": "日時の形式などが読めず判定不能",
+}
+
+
+def overall_reason_codes(result: Dict[str, str]) -> List[Tuple[str, str]]:
+    """総合判定が「要確認」になる理由を、(コード, 表示文)の一覧で返す。
+
+    overall_messageの文面と、APIの理由別件数の両方がこの関数を使う(理由の数え方を1か所にそろえるため)。
+    """
+
+    codes: List[Tuple[str, str]] = []
+    if result.get("audit_status") == "NEEDS_REVIEW":
+        missing = result.get("missing_fields", "")
+        if missing == "対応要否":
+            codes.append(("action_required_unknown", OVERALL_REASON_LABELS["action_required_unknown"]))
+        else:
+            codes.append(("missing_fields", f"項目不足({missing})"))
+    if result.get("sla_audit_status") == "NEEDS_REVIEW":
+        codes.append(("overdue", OVERALL_REASON_LABELS["overdue"]))
+    if result.get("duplicate_audit_status") == "NEEDS_REVIEW":
+        codes.append(("duplicate", OVERALL_REASON_LABELS["duplicate"]))
+    if result.get("priority_audit_status") == "NEEDS_REVIEW":
+        codes.append(("priority_mismatch", OVERALL_REASON_LABELS["priority_mismatch"]))
+    if result.get("missing_fields", "") != "対応要否" and any(
+        result.get(f"{prefix}_audit_status") == "UNKNOWN" for prefix in ("priority", "sla", "duplicate")
+    ):
+        codes.append(("unreadable", OVERALL_REASON_LABELS["unreadable"]))
+    return codes
+
+
 def add_overall_audit(result: Dict[str, str]) -> None:
     """総合判定(overall_status)を作る。
 
@@ -324,20 +360,7 @@ def add_overall_audit(result: Dict[str, str]) -> None:
         result["overall_message"] = "対応不要の共有情報です"
         return
 
-    reasons = []
-    if result.get("audit_status") == "NEEDS_REVIEW":
-        missing = result.get("missing_fields", "")
-        reasons.append("対応要否が不明" if missing == "対応要否" else f"項目不足({missing})")
-    if result.get("sla_audit_status") == "NEEDS_REVIEW":
-        reasons.append("期限超過")
-    if result.get("duplicate_audit_status") == "NEEDS_REVIEW":
-        reasons.append("重複候補")
-    if result.get("priority_audit_status") == "NEEDS_REVIEW":
-        reasons.append("優先度の不一致")
-    if result.get("missing_fields", "") != "対応要否" and any(
-        result.get(f"{prefix}_audit_status") == "UNKNOWN" for prefix in ("priority", "sla", "duplicate")
-    ):
-        reasons.append("日時の形式などが読めず判定不能")
+    reasons = [label for _, label in overall_reason_codes(result)]
 
     if reasons:
         result["overall_status"] = "NEEDS_REVIEW"

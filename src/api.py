@@ -27,7 +27,9 @@ from audit_rules import (
     DATETIME_FORMAT,
     DEFAULT_DUPLICATE_WINDOW_HOURS,
     DEFAULT_HIGH_PRIORITY_SLA_HOURS,
+    OVERALL_REASON_LABELS,
     audit_records,
+    overall_reason_codes,
     parse_action_required,
 )
 import history_store
@@ -182,11 +184,24 @@ def health() -> Dict[str, str]:
     return {"status": "ok", "version": app.version}
 
 
-def summarize(results: List[Dict[str, str]]) -> Dict[str, int]:
+def count_overall_reasons(results: List[Dict[str, str]]) -> Dict[str, int]:
+    """総合判定が要確認になった理由別の件数(1件が複数の理由に数えられることがある)。"""
+
+    counts = {code: 0 for code in OVERALL_REASON_LABELS}
+    for result in results:
+        if result.get("overall_status") != "NEEDS_REVIEW":
+            continue
+        for code, _ in overall_reason_codes(result):
+            counts[code] += 1
+    return counts
+
+
+def summarize(results: List[Dict[str, str]]) -> Dict[str, object]:
     """監査結果の件数のまとめ。
 
     ready / needs_review / info_only は「項目の充足」(audit_status)の件数。
     overall_ready / overall_needs_review が、期限超過・重複・優先度の不一致なども含めた総合判定の件数。
+    overall_reasons は、総合判定が要確認になった理由別の件数(1件が複数の理由に数えられることがある)。
     """
 
     return {
@@ -198,6 +213,7 @@ def summarize(results: List[Dict[str, str]]) -> Dict[str, int]:
         "overdue": count_status(results, "sla_audit_status", "NEEDS_REVIEW"),
         "duplicate_candidates": count_status(results, "duplicate_audit_status", "NEEDS_REVIEW"),
         "priority_mismatch": count_status(results, "priority_audit_status", "NEEDS_REVIEW"),
+        "overall_reasons": count_overall_reasons(results),
     }
 
 

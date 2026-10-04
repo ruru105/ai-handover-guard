@@ -158,6 +158,21 @@ class OverallStatusEndpointTest(unittest.TestCase):
         self.assertEqual(data["summary"]["overall_ready"], 0)
         self.assertEqual(data["summary"]["overall_needs_review"], 1)
 
+    def test_overall_reasons_count_each_reason(self) -> None:
+        overdue = make_record(record_id="A1", extracted_action="部品Bを発注する", extracted_deadline="2026-09-16 09:00")
+        missing = make_record(record_id="A2", extracted_action="床を清掃する", extracted_assignee="")
+        clean = make_record(record_id="A3", extracted_action="伝票を提出する")
+        data = client.post("/audit", json={"records": [overdue, missing, clean], "as_of": self.AS_OF}).json()
+        reasons = data["summary"]["overall_reasons"]
+        self.assertEqual(reasons["overdue"], 1)
+        self.assertEqual(reasons["missing_fields"], 1)
+        self.assertEqual(reasons["duplicate"], 0)
+        self.assertEqual(data["summary"]["overall_needs_review"], 2)
+
+    def test_overall_reasons_are_zero_for_clean_record(self) -> None:
+        data = client.post("/audit", json={"records": [make_record()], "as_of": self.AS_OF}).json()
+        self.assertEqual(sum(data["summary"]["overall_reasons"].values()), 0)
+
     def test_clean_record_is_overall_ready(self) -> None:
         data = client.post("/audit", json={"records": [make_record()], "as_of": self.AS_OF}).json()
         self.assertEqual(data["results"][0]["overall_status"], "READY")
