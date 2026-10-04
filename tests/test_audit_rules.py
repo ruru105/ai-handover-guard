@@ -1,6 +1,7 @@
 """やること抜けチェッカー V0.1〜V0.4 の監査ルールテスト。"""
 
 import csv
+import os
 import sys
 import unittest
 from datetime import datetime
@@ -606,10 +607,13 @@ class ExcelSafeCsvOutputTest(unittest.TestCase):
             source = tmp_path / "in.csv"
             source.write_text(header + row, encoding="utf-8-sig")
             output = tmp_path / "audit_result.csv"
+            # Windowsでは、パイプに流れる出力が既定でcp932になり、UTF-8で読むと文字化けして
+            # 読み取りが失敗する。子プロセスの出力をUTF-8にそろえる。
+            child_env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
             result = subprocess.run(
                 [sys.executable, str(PROJECT_ROOT / "src" / "audit_rules.py"),
                  "--input", str(source), "--output", str(output), "--as-of", "2026-09-20 09:00"],
-                capture_output=True, text=True, encoding="utf-8",
+                capture_output=True, text=True, encoding="utf-8", env=child_env,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             machine = list(csv.DictReader(output.open(encoding="utf-8-sig", newline="")))
