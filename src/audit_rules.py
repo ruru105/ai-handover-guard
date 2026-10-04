@@ -180,21 +180,32 @@ def add_sla_audit(
         result["sla_audit_message"] = "登録日時を読み取れないため判定できません"
         return
 
+    deadline_text = result.get("extracted_deadline", "").strip()
+    deadline, date_only = parse_deadline(deadline_text)
+
     if result.get("rule_priority") == "高":
+        # 緊急度「高」の判定には文中の期限を使わないが、書かれているのに読めない期限は
+        # 見逃さない(読めない期限を黙って「期限内・問題なし」にしない)。
+        unreadable = deadline is None and bool(deadline_text)
+        note = f"(期限の書式を読み取れません。値: {deadline_text})" if unreadable else ""
         elapsed_hours = (as_of - submitted_at).total_seconds() / 3600
         if elapsed_hours > sla_hours:
             result["sla_audit_status"] = "NEEDS_REVIEW"
             result["sla_audit_message"] = (
                 f"緊急度が高いのに登録から{elapsed_hours:.1f}時間"
-                f"({sla_hours:g}時間以内が目安)着手されていません"
+                f"({sla_hours:g}時間以内が目安)着手されていません" + note
+            )
+        elif unreadable:
+            result["sla_audit_status"] = "UNKNOWN"
+            result["sla_audit_message"] = (
+                "緊急度「高」の目安時間内ですが、期限の書式(YYYY-MM-DD HH:MM または YYYY-MM-DD)を"
+                f"読み取れないため判定できません(値: {deadline_text})"
             )
         else:
             result["sla_audit_status"] = "ON_TIME"
             result["sla_audit_message"] = "緊急度「高」の目安時間内です"
         return
 
-    deadline_text = result.get("extracted_deadline", "").strip()
-    deadline, date_only = parse_deadline(deadline_text)
     if deadline is None and deadline_text:
         result["sla_audit_status"] = "UNKNOWN"
         result["sla_audit_message"] = (

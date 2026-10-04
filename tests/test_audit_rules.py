@@ -274,6 +274,43 @@ class SlaAuditTest(unittest.TestCase):
             self.assertEqual(result["overall_status"], "NEEDS_REVIEW", bad)
             self.assertIn(bad, result["sla_audit_message"])
 
+    def _high_priority_record(self, deadline: str) -> dict:
+        return {
+            "message_text": "田中さん、至急、部品Aを確認してください",
+            "submitted_at": "2026-09-20 08:00",
+            "action_required": "true",
+            "extracted_action": "部品Aを確認する",
+            "extracted_assignee": "田中",
+            "extracted_deadline": deadline,
+            "extracted_priority": "高",
+        }
+
+    def test_high_priority_with_unreadable_deadline_is_not_passed_silently(self) -> None:
+        # 緊急度「高」でも、書かれているのに読めない期限は「期限内・問題なし」にしない。
+        for bad in ("来週中", "2026/09/18", "2026-09-18 25:00"):
+            result = audit_record(self._high_priority_record(bad), as_of=datetime(2026, 9, 20, 9, 0))
+            self.assertEqual(result["rule_priority"], "高", bad)
+            self.assertEqual(result["sla_audit_status"], "UNKNOWN", bad)
+            self.assertEqual(result["overall_status"], "NEEDS_REVIEW", bad)
+            self.assertIn(bad, result["sla_audit_message"])
+
+    def test_high_priority_overdue_keeps_warning_when_deadline_is_unreadable(self) -> None:
+        # 4時間を過ぎた着手遅れの警告を、読めない期限で失わない。読めない旨も併記する。
+        result = audit_record(self._high_priority_record("来週中"), as_of=datetime(2026, 9, 20, 13, 0))
+
+        self.assertEqual(result["sla_audit_status"], "NEEDS_REVIEW")
+        self.assertEqual(result["overall_status"], "NEEDS_REVIEW")
+        self.assertIn("着手されていません", result["sla_audit_message"])
+        self.assertIn("来週中", result["sla_audit_message"])
+
+    def test_high_priority_with_readable_or_empty_deadline_is_unchanged(self) -> None:
+        for ok in ("2026-09-25 15:00", "2026-09-25"):
+            result = audit_record(self._high_priority_record(ok), as_of=datetime(2026, 9, 20, 9, 0))
+            self.assertEqual(result["sla_audit_status"], "ON_TIME", ok)
+            self.assertEqual(result["overall_status"], "READY", ok)
+        result = audit_record(self._high_priority_record(""), as_of=datetime(2026, 9, 20, 9, 0))
+        self.assertEqual(result["sla_audit_status"], "ON_TIME")
+
     def test_empty_deadline_is_still_not_applicable(self) -> None:
         result = audit_record(self._date_only_record(""), as_of=datetime(2026, 9, 20, 9, 0))
         self.assertEqual(result["sla_audit_status"], "NOT_APPLICABLE")
