@@ -174,6 +174,8 @@ python -m uvicorn api:app --app-dir src
 python -m unittest discover -s tests -v
 ```
 
+GitHubにpushするたびに、同じテストが自動で実行されます(`.github/workflows/tests.yml`)。APIキーは不要で、課金も発生しません。
+
 ## 試験データの再生成
 
 ```bash
@@ -285,6 +287,7 @@ python src/llm_extractor.py --execute --limit 100
 サンプルデータはすべて架空です。個人情報や実在する職場の内部情報は使用しません。
 
 - 実API検証は架空データ100件(16種類の文型)を1回実行したのみであり、本番運用の精度保証ではありません。
+- API(`/extract`)の本物のAIでの動作は、架空2件で1回確認したのみです(詳細は`docs/SPEC.md`22章)。
 - 作業内容が曖昧な文(「例の件」など)は、現在の監査では要確認にできません。
 - 優先度ルールはサンプル用です。実運用では業種や組織に合わせた設定が必要です。
 - AIの出力は実行ごとに表現が変わる可能性があります。
