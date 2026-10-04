@@ -220,6 +220,9 @@ python scripts/generate_sample_data.py
 - `priority_rule`：Pythonが原文から独立判定した優先度の一致
 - `all_fields_exact`：主要項目がすべて完全一致した割合
 - `all_fields_normalized`：対応内容を正規化した上で主要項目がすべて一致した割合
+- `prediction_coverage`：正解表のうち、AIの回答があった件数
+
+**回答がない件は不正解として数えます。** 正解表のすべてのrecord_idが採点の対象で、AIの回答が欠けた件は、全項目「不一致」として分母に入れます(回答が欠けた件だけを外すと、正解率が実際より高く見えるためです)。`prediction_coverage`が100%未満のときは、評価の実行時に「回答がない正解表のID」の件数が表示され、`evaluation_details.csv`には「(回答なし)」の行が残ります。10件試験のように、一部だけを試したときに回答のある件だけを採点したい場合は、`python src/evaluate_predictions.py --allow-partial`(または`python src/run_trial_pipeline.py --allow-partial`)と明示します。同じrecord_idが複数ある場合は、どちらを採点したか分からなくなるため、エラーにします。
 
 ## 開発予定
 
@@ -231,6 +234,7 @@ python scripts/generate_sample_data.py
 - V0.6：APIサーバー(FastAPI)で監査・期限超過一覧・AI抽出を提供(実装済み)
 - V0.7：SQLiteに履歴を保存し、過去分にまたがる重複候補を判定(実装済み)
 - V0.8：項目の充足と総合判定を分け、読めない日時・対応要否の誤記を要確認にする(実装済み)
+- V0.8.1：回答が欠けた件を不正解として採点し、重複IDを検出する(実装済み)
 - V1.0：入力から通知までの一連の業務フロー
 
 ## API接続の安全設計

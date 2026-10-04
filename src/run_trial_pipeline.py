@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from audit_rules import run_audit
@@ -28,6 +29,14 @@ DETAIL_PATH = PROJECT_ROOT / "output" / "evaluation_details.csv"
 def main() -> None:
     """AI出力を監査し、正解率と不一致明細を作る。"""
 
+    parser = argparse.ArgumentParser(description="保存済みのAI回答を監査・評価する")
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="回答のある件だけを採点する(10件試験など)。指定しない場合、回答がない件は不正解として数える",
+    )
+    args = parser.parse_args()
+
     if not AI_PREDICTIONS_PATH.exists():
         raise FileNotFoundError(
             "output/ai_predictions.csv がありません。先にAI試験を実行してください"
@@ -40,6 +49,7 @@ def main() -> None:
         AUDIT_RESULT_PATH,
         SUMMARY_PATH,
         DETAIL_PATH,
+        args.allow_partial,
     )
 
     needs_review_count = sum(
