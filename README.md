@@ -47,6 +47,7 @@ src/audit_rules.py         ← 不足項目を監査
         ↓
 output/audit_result.csv    ← 機械が読む結果(英語の項目名)
 output/audit_result.xlsx   ← 人が読むExcel版(日本語見出し・列幅調整つき)
+output/audit_result_for_excel.csv ← Excelで直接開く用のCSV(数式が実行されないよう加工済み)
         ↓
 src/evaluate_predictions.py ← 正解表と比較
         ↓
@@ -61,7 +62,7 @@ python src/audit_rules.py
 python src/evaluate_predictions.py
 ```
 
-`audit_rules.py`は、監査結果を`output/audit_result.csv`(評価処理が読む元データ)と、人が読むための`output/audit_result.xlsx`の両方へ出力します。Excel版は次のように作っています(`src/excel_report.py`)。
+`audit_rules.py`は、監査結果を`output/audit_result.csv`(評価処理が読む元データ)と、人が読むための`output/audit_result.xlsx`、Excelで直接開く用の`output/audit_result_for_excel.csv`へ出力します。Excel版は次のように作っています(`src/excel_report.py`)。
 
 - 1行目に英語の項目名(小さい灰色)、2行目に日本語見出しを置く
 - 総合判定・項目の充足などの値は「`NEEDS_REVIEW`(要確認)」のように英語と日本語を併記する
@@ -127,6 +128,19 @@ python -m uvicorn api:app --app-dir src
 - 通常の`/audit`は、これまでどおり履歴を使わず、保存もしません
 
 実際のAI出力100件を、時間がバラバラな4回に分けて監査したところ、履歴なしでは重複候補が4件、履歴ありでは9件になり、最終回の25件は100件まとめて監査した結果と全件一致しました。ただし、**先に保存された記録は、あとから重複が届いても「重複」には更新されません**(あとから届いた側に「先の記録と重複」と出ます)。まとめて監査した場合の13件には届きません。
+
+## CSVをExcelで開くときの注意(数式の無効化)
+
+申し送りの原文のような外部由来の文字が`=`・`+`・`-`・`@`で始まっていると、CSVをExcelで直接開いたときに、数式として実行される恐れがあります(CSVインジェクション)。そのため、出力を次のように分けています。
+
+| ファイル | 用途 | 数式への対策 |
+|---|---|---|
+| `output/audit_result.csv` | 評価処理が読み戻す元データ | 原文のまま(書き換えません)。**Excelで直接開かないでください** |
+| `output/audit_result_for_excel.csv` | 人がExcelで開く用 | 危険な文字で始まる文字の前に「`'`」を付けて、文字として扱わせます。画面には「`'`」が見えることがあります |
+| `output/audit_result.xlsx` | 人が読むExcel版 | 文字のセルとして保存します |
+| `output/evaluation_details.csv` | 不一致の確認用(プログラムは読み戻しません) | 「`'`」を付けて出力します |
+
+`output/ai_predictions.csv`など、プログラムの途中で受け渡すCSVも原文のままです。人が読むときは、上の「人がExcelで開く用」のファイルを使ってください。
 
 ## 総合判定と項目の充足(V0.8)
 
@@ -235,6 +249,7 @@ python scripts/generate_sample_data.py
 - V0.7：SQLiteに履歴を保存し、過去分にまたがる重複候補を判定(実装済み)
 - V0.8：項目の充足と総合判定を分け、読めない日時・対応要否の誤記を要確認にする(実装済み)
 - V0.8.1：回答が欠けた件を不正解として採点し、重複IDを検出する(実装済み)
+- V0.8.2：Excelで直接開く用のCSVを別に出力し、数式として実行されないようにする(実装済み)
 - V1.0：入力から通知までの一連の業務フロー
 
 ## API接続の安全設計

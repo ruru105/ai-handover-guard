@@ -552,5 +552,41 @@ class OverallStatusTest(unittest.TestCase):
         self.assertIn("overall_message", results[0])
 
 
+class ExcelSafeCsvOutputTest(unittest.TestCase):
+    """コマンドで監査したとき、採点用CSVは元のまま、Excelで開く用のCSVは数式が無効になること。"""
+
+    def test_cli_writes_machine_csv_unchanged_and_excel_safe_csv(self) -> None:
+        import subprocess
+        import tempfile
+
+        header = (
+            "record_id,submitted_at,source_department,message_text,extracted_action,"
+            "extracted_assignee,extracted_deadline,extracted_priority,action_required\n"
+        )
+        row = "R1,2026-09-19 08:00,製造,=1+1,=HYPERLINK(1),田中,2026-09-25 15:00,中,true\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source = tmp_path / "in.csv"
+            source.write_text(header + row, encoding="utf-8-sig")
+            output = tmp_path / "audit_result.csv"
+            result = subprocess.run(
+                [sys.executable, str(PROJECT_ROOT / "src" / "audit_rules.py"),
+                 "--input", str(source), "--output", str(output), "--as-of", "2026-09-20 09:00"],
+                capture_output=True, text=True, encoding="utf-8",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            machine = list(csv.DictReader(output.open(encoding="utf-8-sig", newline="")))
+            safe = list(csv.DictReader(
+                (tmp_path / "audit_result_for_excel.csv").open(encoding="utf-8-sig", newline="")
+            ))
+        # 採点・再読み込みに使う元のCSVは、原文のまま(書き換えない)
+        self.assertEqual(machine[0]["message_text"], "=1+1")
+        self.assertEqual(machine[0]["extracted_action"], "=HYPERLINK(1)")
+        # Excelで開く用は、先頭に「'」が付く
+        self.assertEqual(safe[0]["message_text"], "'=1+1")
+        self.assertEqual(safe[0]["extracted_action"], "'=HYPERLINK(1)")
+        self.assertEqual(safe[0]["record_id"], "R1")
+
+
 if __name__ == "__main__":
     unittest.main()

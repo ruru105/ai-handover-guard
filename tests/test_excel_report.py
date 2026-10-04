@@ -15,6 +15,9 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from audit_rules import audit_records, read_csv  # noqa: E402
 from excel_report import (  # noqa: E402
     JAPANESE_LABELS,
+    excel_safe_csv_path,
+    excel_safe_text,
+    write_excel_safe_csv,
     MAX_COLUMN_WIDTH,
     calculate_column_width,
     display_value,
@@ -200,6 +203,44 @@ class ExcelFormulaSafetyTest(unittest.TestCase):
         with zipfile.ZipFile(path) as archive:
             xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
         self.assertNotIn("<f>", xml)
+
+
+class ExcelSafeCsvTest(unittest.TestCase):
+    """CSVをExcelで直接開いても、数式として実行されないこと。"""
+
+    def test_dangerous_prefixes_get_an_apostrophe(self) -> None:
+        for dangerous in ("=1+1", "+1+1", "-2+3", "@SUM(1)", "\tcmd", "\rcmd", '=HYPERLINK("http://example.invalid","x")'):
+            self.assertEqual(excel_safe_text(dangerous), "'" + dangerous)
+
+    def test_normal_text_and_non_text_are_unchanged(self) -> None:
+        for normal in ("田中", "2026-09-20 09:00", "READY", "", "a=b", "100%", 5, None):
+            self.assertEqual(excel_safe_text(normal), normal)
+
+    def test_safe_csv_path_is_beside_the_machine_csv(self) -> None:
+        path = excel_safe_csv_path(Path("output") / "audit_result.csv")
+        self.assertEqual(path, Path("output") / "audit_result_for_excel.csv")
+
+    def test_written_csv_has_no_cell_that_starts_with_a_formula_character(self) -> None:
+        import csv
+
+        records = [
+            {"record_id": "R1", "message_text": "=1+1", "extracted_action": "+cmd", "extracted_assignee": "-2+3"},
+            {"record_id": "R2", "message_text": "@SUM(1)", "extracted_action": "確認", "extracted_assignee": "田中"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit_result_for_excel.csv"
+            write_excel_safe_csv(path, records)
+            with path.open(encoding="utf-8-sig", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        self.assertEqual(rows[0]["message_text"], "'=1+1")
+        self.assertEqual(rows[1]["extracted_action"], "確認")
+        for row in rows:
+            for value in row.values():
+                self.assertFalse(value.startswith(("=", "+", "-", "@")), value)
+
+    def test_empty_records_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            write_excel_safe_csv(Path("unused.csv"), [])
 
 
 if __name__ == "__main__":

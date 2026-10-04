@@ -7,7 +7,7 @@ from pathlib import Path
 
 from audit_rules import run_audit
 from evaluate_predictions import run_evaluation
-from excel_report import write_audit_xlsx
+from excel_report import excel_safe_csv_path, write_audit_xlsx, write_excel_safe_csv
 
 
 # ============================================================
@@ -44,6 +44,7 @@ def main() -> None:
 
     audited_records = run_audit(AI_PREDICTIONS_PATH, AUDIT_RESULT_PATH)
     write_audit_xlsx(AUDIT_RESULT_PATH.with_suffix(".xlsx"), audited_records)
+    write_excel_safe_csv(excel_safe_csv_path(AUDIT_RESULT_PATH), audited_records)
     summary = run_evaluation(
         EXPECTED_PATH,
         AUDIT_RESULT_PATH,
@@ -62,6 +63,7 @@ def main() -> None:
         print(f"{row['metric']}: {row['correct']}/{row['total']} ({row['accuracy']})")
     print(f"不一致明細: {DETAIL_PATH}")
     print(f"Excel版の監査結果: {AUDIT_RESULT_PATH.with_suffix('.xlsx')}")
+    print(f"Excelで開く用のCSV: {excel_safe_csv_path(AUDIT_RESULT_PATH)}")
 
 
 if __name__ == "__main__":

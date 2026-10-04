@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import math
 import unicodedata
 from pathlib import Path
@@ -135,6 +136,38 @@ def as_text_cell(cell):
     if isinstance(cell.value, str):
         cell.data_type = "s"
     return cell
+
+
+# Excelは、これらの文字で始まる文字を数式として実行する(CSVを直接開いたとき)。
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def excel_safe_text(value: object) -> object:
+    """文字列がExcelで数式として実行されないよう、危険な文字で始まる場合は先頭に「'」を付ける。"""
+
+    if isinstance(value, str) and value.startswith(FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
+def excel_safe_csv_path(machine_csv_path: Path) -> Path:
+    """機械が読むCSVに対応する、Excelで開いても安全なCSVのパス(例: audit_result_for_excel.csv)。"""
+
+    return machine_csv_path.with_name(f"{machine_csv_path.stem}_for_excel{machine_csv_path.suffix}")
+
+
+def write_excel_safe_csv(path: Path, records: List[Dict[str, str]]) -> None:
+    """Excelで直接開いても数式が実行されないCSVを出力する(人が開く用。採点などの元データには使わない)。"""
+
+    if not records:
+        raise ValueError("出力対象のデータがありません")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(records[0].keys()))
+        writer.writeheader()
+        for record in records:
+            writer.writerow({key: excel_safe_text(value) for key, value in record.items()})
 
 
 def write_audit_xlsx(path: Path, records: List[Dict[str, str]]) -> None:

@@ -8,6 +8,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from excel_report import excel_safe_text
+
 
 # ============================================================
 # 1. パスと比較項目
@@ -283,7 +285,10 @@ def write_details(path: Path, details: List[Dict[str, str]]) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=list(details[0].keys()))
         writer.writeheader()
-        writer.writerows(details)
+        # この明細は人がExcelで開いて確認するための出力で、プログラムは読み戻さない。
+        # 申し送りの原文などが数式として実行されないよう、危険な文字で始まる文字の前に「'」を付ける。
+        for detail in details:
+            writer.writerow({key: excel_safe_text(value) for key, value in detail.items()})
 
 
 def run_evaluation(

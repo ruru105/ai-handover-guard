@@ -18,6 +18,7 @@ from evaluate_predictions import (  # noqa: E402
     missing_and_extra_ids,
     read_by_id,
     run_evaluation,
+    write_details,
 )
 
 
@@ -247,6 +248,23 @@ class RunEvaluationTest(unittest.TestCase):
         lenient = {row["metric"]: row for row in partial}
         self.assertEqual((strict["all_fields_exact"]["correct"], strict["all_fields_exact"]["total"]), ("1", "2"))
         self.assertEqual((lenient["all_fields_exact"]["correct"], lenient["all_fields_exact"]["total"]), ("1", "1"))
+
+
+class DetailsCsvSafetyTest(unittest.TestCase):
+    def test_details_csv_neutralizes_formulas_but_summary_keeps_numbers(self) -> None:
+        details = [
+            {"record_id": "A1", "message_text": "=1+1", "metric": "assignee",
+             "expected": "田中", "predicted": "@SUM(1)", "match": "false"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "details.csv"
+            write_details(path, details)
+            with path.open(encoding="utf-8-sig", newline="") as stream:
+                row = next(csv.DictReader(stream))
+        self.assertEqual(row["message_text"], "'=1+1")
+        self.assertEqual(row["predicted"], "'@SUM(1)")
+        self.assertEqual(row["expected"], "田中")
+        self.assertEqual(row["match"], "false")
 
 
 if __name__ == "__main__":

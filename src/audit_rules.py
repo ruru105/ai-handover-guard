@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from excel_report import write_audit_xlsx
+from excel_report import excel_safe_csv_path, write_audit_xlsx, write_excel_safe_csv
 
 
 # ============================================================
@@ -505,6 +505,11 @@ def main() -> None:
     xlsx_path = args.output.with_suffix(".xlsx")
     write_audit_xlsx(xlsx_path, audited_records)
     print(f"出力先(Excel): {xlsx_path.resolve()}")
+
+    # Excelで直接開いても数式が実行されないCSV(危険な文字で始まる文字の前に「'」を付けた版)
+    safe_csv_path = excel_safe_csv_path(args.output)
+    write_excel_safe_csv(safe_csv_path, audited_records)
+    print(f"出力先(Excelで開く用のCSV): {safe_csv_path.resolve()}")
 
 
 if __name__ == "__main__":
