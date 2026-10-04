@@ -636,6 +636,34 @@ class VagueActionTest(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertIsNone(detect_vague_action(action))
 
+    def test_more_reference_and_filler_phrases_are_vague(self) -> None:
+        for action in (
+            "例の案件", "例の案件を確認する", "いつも通り対応", "いつも通りお願いします", "前回同様に",
+            "同様に対応", "例の通り", "アレをやっておいて", "ｱﾚをお願い",
+        ):
+            with self.subTest(action=action):
+                self.assertEqual(detect_vague_action(action), "reference")
+        for action in (
+            "とりあえず確認", "一応連絡しておく", "適宜対応", "提出", "返信をお願いします", "修正", "送付する",
+            "作成して", "承認お願いします", "いろいろ調整", "ちゃんと確認", "案件", "よろしくお願いします",
+            "宜しくお願いします", "点検する", "整理しておく", "念のため確認", "見直し", "申請する",
+        ):
+            with self.subTest(action=action):
+                self.assertEqual(detect_vague_action(action), "generic")
+
+    def test_concrete_actions_are_not_flagged_by_the_extended_lists(self) -> None:
+        """言葉のリストを増やしても、対象が書かれた具体的な作業内容を曖昧と誤判定しない。"""
+        for action in (
+            "報告書を提出する", "請求書の件を確認する", "見積書を作成する", "作業手順書を更新する", "会議室を予約する",
+            "田中さんに返信する", "来週の会議資料を送付する", "その他の備品を発注する", "同じ部品を発注する",
+            "確認書を提出する", "申請書を回収する", "3件の請求を確認する", "事故報告書を作成する",
+            "シフト表を修正する", "契約内容を見直す", "安全点検表を整理する", "顧客名簿を更新する",
+            "新人の研修を手配する", "案件管理表を更新する", "備品の発注", "設備3号機の異音を確認する",
+            "予備電源8の燃料補充を手配する", "配送会社へ連絡する", "照明を交換する",
+        ):
+            with self.subTest(action=action):
+                self.assertIsNone(detect_vague_action(action))
+
     def test_empty_action_is_not_judged_here(self) -> None:
         self.assertIsNone(detect_vague_action(""))
         self.assertIsNone(detect_vague_action("  　"))
