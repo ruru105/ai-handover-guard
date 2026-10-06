@@ -4,6 +4,10 @@
 100件を10件ずつ10回に分けて`/extract`へ送り、返った結果をCSVに保存して、正解表と比べる。
 自動で再試行はしない。途中で失敗したら、そこで止まる(それまでの結果は保存する)。
 
+`--score-only`を付けると、通信せずに、保存済みの結果だけを採点し直す(費用はかからない)。
+採点は、CLIの`run_trial_pipeline.py`と同じく、先に監査(`audit_rules`)をしてから正解表と比べる
+(`priority_rule`・`audit_status`は監査の結果の列を使うため、監査をしないと0になる)。
+
 既存の`output/ai_predictions.csv`(CLIで実行した結果)は上書きしない。
 APIの結果は、別のファイル(`output/ai_predictions_api.csv`など)に保存する。
 """
@@ -20,6 +24,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from audit_rules import run_audit  # noqa: E402
 from evaluate_predictions import run_evaluation  # noqa: E402
 from llm_extractor import MAX_TRIAL_RECORDS, read_trial_rows, write_csv  # noqa: E402
 
@@ -33,6 +38,7 @@ RAW_INPUT_PATH = PROJECT_ROOT / "data" / "raw_handover.csv"
 EXPECTED_PATH = PROJECT_ROOT / "data" / "expected_labels.csv"
 CLI_PREDICTIONS_PATH = PROJECT_ROOT / "output" / "ai_predictions.csv"
 API_PREDICTIONS_PATH = PROJECT_ROOT / "output" / "ai_predictions_api.csv"
+API_AUDIT_PATH = PROJECT_ROOT / "output" / "audit_result_api.csv"
 API_SUMMARY_PATH = PROJECT_ROOT / "output" / "evaluation_summary_api.csv"
 API_DETAILS_PATH = PROJECT_ROOT / "output" / "evaluation_details_api.csv"
 
@@ -158,7 +164,49 @@ def read_rows(path: Path) -> List[Dict[str, str]]:
 
 
 # ============================================================
-# 4. コマンド実行
+# 4. 採点
+# ============================================================
+
+def score_predictions(
+    predictions_path: Path,
+    allow_partial: bool,
+    audit_path: Optional[Path] = None,
+    summary_path: Optional[Path] = None,
+    details_path: Optional[Path] = None,
+) -> List[Dict[str, str]]:
+    """保存済みのAI回答を監査してから、正解表と比べる(追加のAPI通信なし)。"""
+
+    audit_path = audit_path or API_AUDIT_PATH
+    run_audit(predictions_path, audit_path)
+    return run_evaluation(
+        EXPECTED_PATH,
+        audit_path,
+        summary_path or API_SUMMARY_PATH,
+        details_path or API_DETAILS_PATH,
+        allow_partial,
+    )
+
+
+def print_summary(summary: List[Dict[str, str]]) -> None:
+    print("採点(APIの結果):")
+    for row in summary:
+        print(f"  {row['metric']}: {row['correct']}/{row['total']} ({row['accuracy']})")
+
+
+def print_comparison(predictions: List[Dict[str, str]]) -> None:
+    if not CLI_PREDICTIONS_PATH.exists():
+        return
+    result = compare_predictions(predictions, read_rows(CLI_PREDICTIONS_PATH))
+    print(
+        f"CLIの結果との比較(参考): 共通{result['common']}件のうち、"
+        f"5項目すべて同じ {result['same_all']}件"
+    )
+    for field, count in result["per_field"].items():
+        print(f"  {field}: {count}/{result['common']}")
+
+
+# ============================================================
+# 5. コマンド実行
 # ============================================================
 
 def main() -> int:
@@ -171,7 +219,26 @@ def main() -> int:
         action="store_true",
         help="有料のAPI通信を実行する(付けない場合は、予定を表示して終わる)",
     )
+    parser.add_argument(
+        "--score-only",
+        action="store_true",
+        help="通信せず、保存済みの結果(--output)を採点し直す(費用なし)",
+    )
     args = parser.parse_args()
+
+    if args.score_only:
+        if args.yes:
+            print("エラー: --score-only と --yes は一緒に使えません(採点だけのときは通信しません)")
+            return 2
+        if not args.output.exists():
+            print(f"エラー: {args.output} がありません。先に --yes で実行してください")
+            return 2
+        saved = read_rows(args.output)
+        print(f"通信せずに、保存済みの{len(saved)}件を採点します(費用はかかりません)")
+        print_summary(score_predictions(args.output, len(saved) < MAX_TRIAL_RECORDS))
+        print_comparison(saved)
+        print(f"採点の明細: {API_DETAILS_PATH}")
+        return 0
 
     rows = read_trial_rows(args.input, args.limit)
     batches = split_batches(rows)
@@ -203,22 +270,8 @@ def main() -> int:
         print("そこで止めました(それまでの結果は保存しています。採点はしていません)")
         return 1
 
-    allow_partial = len(rows) < MAX_TRIAL_RECORDS
-    summary = run_evaluation(
-        EXPECTED_PATH, args.output, API_SUMMARY_PATH, API_DETAILS_PATH, allow_partial
-    )
-    print("採点(APIの結果):")
-    for row in summary:
-        print(f"  {row['metric']}: {row['correct']}/{row['total']} ({row['accuracy']})")
-
-    if CLI_PREDICTIONS_PATH.exists():
-        result = compare_predictions(predictions, read_rows(CLI_PREDICTIONS_PATH))
-        print(
-            f"CLIの結果との比較(参考): 共通{result['common']}件のうち、"
-            f"5項目すべて同じ {result['same_all']}件"
-        )
-        for field, count in result["per_field"].items():
-            print(f"  {field}: {count}/{result['common']}")
+    print_summary(score_predictions(args.output, len(rows) < MAX_TRIAL_RECORDS))
+    print_comparison(predictions)
     print(f"採点の明細: {API_DETAILS_PATH}")
     return 0
 

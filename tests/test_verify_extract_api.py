@@ -230,6 +230,7 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             with mock.patch.object(api, "create_openai_client", return_value=fake), \
+                 mock.patch.object(verify, "API_AUDIT_PATH", tmp_path / "a.csv"), \
                  mock.patch.object(verify, "API_SUMMARY_PATH", tmp_path / "s.csv"), \
                  mock.patch.object(verify, "API_DETAILS_PATH", tmp_path / "d.csv"), \
                  mock.patch.object(verify, "CLI_PREDICTIONS_PATH", tmp_path / "none.csv"):
@@ -241,12 +242,14 @@ class MainTest(unittest.TestCase):
             saved = verify.read_rows(tmp_path / "p.csv")
             self.assertEqual(len(saved), 100)
             self.assertTrue((tmp_path / "s.csv").exists())
+            self.assertTrue((tmp_path / "a.csv").exists())  # 採点の前に監査をしている
 
     def test_failure_returns_1_saves_partial_and_skips_scoring(self) -> None:
         fake = FakeOpenAI(fail_on_call=15)
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             with mock.patch.object(api, "create_openai_client", return_value=fake), \
+                 mock.patch.object(verify, "API_AUDIT_PATH", tmp_path / "a.csv"), \
                  mock.patch.object(verify, "API_SUMMARY_PATH", tmp_path / "s.csv"), \
                  mock.patch.object(verify, "API_DETAILS_PATH", tmp_path / "d.csv"):
                 code, text = self.run_main(["--yes", "--output", str(tmp_path / "p.csv")])
@@ -255,6 +258,65 @@ class MainTest(unittest.TestCase):
             self.assertEqual(len(verify.read_rows(tmp_path / "p.csv")), 10)
             self.assertFalse((tmp_path / "s.csv").exists())
             self.assertEqual(fake.calls, 15)
+
+
+class ScoreTest(unittest.TestCase):
+    def test_audited_mock_answers_score_100_on_every_metric(self) -> None:
+        """監査を先にしないと、監査由来の指標が0になる不具合の再発防止。"""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            summary = verify.score_predictions(
+                PROJECT_ROOT / "data" / "mock_ai_output.csv",
+                False,
+                tmp_path / "a.csv",
+                tmp_path / "s.csv",
+                tmp_path / "d.csv",
+            )
+        self.assertTrue(summary)
+        for row in summary:
+            self.assertEqual(row["correct"], row["total"], row["metric"])
+        metrics = {row["metric"] for row in summary}
+        self.assertIn("priority_rule", metrics)
+        self.assertIn("audit_status", metrics)
+
+
+class ScoreOnlyTest(unittest.TestCase):
+    def run_main(self, argv):
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["verify_extract_api.py"] + argv):
+            with contextlib.redirect_stdout(out):
+                code = verify.main()
+        return code, out.getvalue()
+
+    def test_score_only_scores_saved_file_without_communication(self) -> None:
+        fake = FakeOpenAI()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with mock.patch.object(api, "create_openai_client", return_value=fake) as creator, \
+                 mock.patch.object(verify, "API_AUDIT_PATH", tmp_path / "a.csv"), \
+                 mock.patch.object(verify, "API_SUMMARY_PATH", tmp_path / "s.csv"), \
+                 mock.patch.object(verify, "API_DETAILS_PATH", tmp_path / "d.csv"), \
+                 mock.patch.object(verify, "CLI_PREDICTIONS_PATH", tmp_path / "none.csv"):
+                code, text = self.run_main(
+                    ["--score-only", "--output", str(PROJECT_ROOT / "data" / "mock_ai_output.csv")]
+                )
+            self.assertEqual(code, 0)
+            self.assertIn("通信せずに", text)
+            self.assertIn("priority_rule: 100/100", text)
+            self.assertEqual(fake.calls, 0)
+            creator.assert_not_called()
+
+    def test_score_only_with_yes_is_an_error(self) -> None:
+        code, text = self.run_main(["--score-only", "--yes"])
+        self.assertEqual(code, 2)
+        self.assertIn("一緒に使えません", text)
+
+    def test_score_only_without_saved_file_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            code, text = self.run_main(["--score-only", "--output", str(Path(tmp) / "none.csv")])
+        self.assertEqual(code, 2)
+        self.assertIn("がありません", text)
 
 
 if __name__ == "__main__":
